@@ -264,6 +264,7 @@ pub fn server_tick_system(
     time: Res<Time>,
     tokio_tasks: Res<TokioTasksRuntime>,
 ) {
+    // Handle lobby waiting
     if server_ticker.waiting_for_lobby {
         server_ticker.lobby_wait_timer.tick(time.delta());
         if server_ticker.lobby_wait_timer.just_finished() {
@@ -273,12 +274,12 @@ pub fn server_tick_system(
         return;
     }
 
+    // Handle registration
     server_ticker.registration_timer.tick(time.delta());
     if server_ticker.registration_timer.just_finished() && !server_client.registered {
         try_register(&mut commands, &tokio_tasks, &server_client.config);
         info!(target: "server", "Registration attempt #{}", server_ticker.registration_attempts + 1);
 
-        // Increase backoff after each attempt, up to a max (e.g. 60s)
         let new_backoff = (server_ticker.registration_backoff * 1.5).min(60.0);
         server_ticker.registration_attempts += 1;
         server_ticker.registration_backoff = new_backoff;
@@ -288,16 +289,22 @@ pub fn server_tick_system(
         server_ticker.registration_timer.reset();
     }
 
+    // Handle arena state requests
     server_ticker.timer.tick(time.delta());
     if server_ticker.timer.just_finished() && server_client.registered {
+        info!(target: "server", "Requesting arena state (registered: {})", server_client.registered);
+
         let client = ServerClient {
             client: server_client.client.clone(),
             config: server_client.config.clone(),
             registered: server_client.registered,
             registration_data: server_client.registration_data.clone(),
         };
+
         spawn_server_task(&mut commands, &tokio_tasks, move |_ctx| async move {
-            client.get_arena_state().await
+            let result = client.get_arena_state().await;
+            info!(target: "server", "Arena state request result: {:?}", result.is_ok());
+            result
         });
     }
 }

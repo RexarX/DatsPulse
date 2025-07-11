@@ -129,10 +129,6 @@ pub fn update_world_rendering(
     tile_query: Query<Entity, With<TileMarker>>,
     home_query: Query<Entity, With<HomeMarker>>,
 ) {
-    if !game_state.connected {
-        return;
-    }
-
     // Clear existing entities
     for entity in ant_query.iter() {
         commands.entity(entity).despawn();
