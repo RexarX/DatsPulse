@@ -39,3 +39,22 @@
 
 # debug information files
 *.dwo
+
+# Logs
+log/
+logs/
+*.log
+
+# Env vars
+*.env
+
+# Config files
+config.toml
+
+# Editors
+*.idea
+*.vs
+*.vscode
+
+# Rust
+target/
