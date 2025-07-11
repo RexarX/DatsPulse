@@ -15,7 +15,7 @@ pub struct CameraController {
 impl Default for CameraController {
     fn default() -> Self {
         Self {
-            movement_speed: 5.0,
+            movement_speed: 8.0, // Faster for hex world
             sprint_multiplier: 2.0,
             mouse_sensitivity: 0.003,
             pitch: 0.0,
@@ -150,6 +150,7 @@ pub fn camera_mouse_look_system(
 pub fn input_system(
     keyboard_input: Res<ButtonInput<KeyCode>>,
     mut reconnect_events: EventWriter<ReconnectRequestEvent>,
+    mut register_events: EventWriter<RegisterRequestEvent>,
     mut menu_state: ResMut<MenuState>,
 ) {
     // Don't process game inputs if menu is open
@@ -159,6 +160,10 @@ pub fn input_system(
 
     if keyboard_input.just_pressed(KeyCode::KeyR) {
         reconnect_events.write(ReconnectRequestEvent);
+    }
+
+    if keyboard_input.just_pressed(KeyCode::KeyG) {
+        register_events.write(RegisterRequestEvent);
     }
 
     if keyboard_input.just_pressed(KeyCode::F1) {

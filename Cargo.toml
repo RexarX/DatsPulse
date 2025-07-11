@@ -33,6 +33,9 @@ reqwest = { version = "0.12", features = ["json"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 
+# UUID
+uuid = { version = "1.0", features = ["v4", "serde"] }
+
 # Bevy
 bevy = { version = "0.16" }
 bevy-tokio-tasks = "0.16"

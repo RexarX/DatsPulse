@@ -100,7 +100,7 @@ fn main() -> anyhow::Result<()> {
 
     let server_config = ServerConfig {
         url: app_config.server.url.clone(),
-        token: config::get_api_token()?,
+        token: app_config.server.token.clone(),
         tick_rate: Duration::from_millis(app_config.server.tick_rate_ms),
         auto_reconnect: app_config.server.auto_reconnect,
     };
@@ -141,6 +141,8 @@ fn main() -> anyhow::Result<()> {
         .add_event::<GameActionEvent>()
         .add_event::<ConnectionEvent>()
         .add_event::<ReconnectRequestEvent>()
+        .add_event::<RegisterRequestEvent>()
+        .add_event::<MoveCommandEvent>()
         .run();
 
     Ok(())

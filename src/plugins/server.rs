@@ -9,10 +9,11 @@ impl Plugin for ServerPlugin {
             Update,
             (
                 server_tick_system,
-                handle_server_connection_tasks,
-                handle_game_state_tasks,
-                handle_game_actions,
-                handle_action_response_tasks,
+                handle_registration_tasks,
+                handle_arena_state_tasks,
+                handle_move_response_tasks,
+                handle_move_commands,
+                handle_register_requests,
                 handle_reconnect_requests,
             ),
         );

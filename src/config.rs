@@ -50,7 +50,7 @@ impl Default for AppConfig {
     fn default() -> Self {
         Self {
             server: ServerConfig {
-                url: "https://games-test.datsteam.dev/api/".to_string(),
+                url: "https://games-test.datsteam.dev".to_string(),
                 token: std::env::var("API_TOKEN").unwrap_or_else(|_| "your-token-here".to_string()),
                 tick_rate_ms: 1000,
                 auto_reconnect: true,

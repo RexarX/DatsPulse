@@ -12,6 +12,9 @@ pub struct ConnectionText;
 #[derive(Component)]
 pub struct DebugText;
 
+#[derive(Component)]
+pub struct GameStateText;
+
 pub fn setup_ui(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
@@ -103,7 +106,7 @@ pub fn setup_ui(
 
             // Controls Text
             parent.spawn((
-                Text::new("Controls:\nWASD: Camera | Space/Ctrl: Up/Down\nEscape: Toggle Mouse | F1: Toggle Debug\nInsert: Menu | R: Reconnect"),
+                Text::new("Controls:\nWASD: Camera | Space/Ctrl: Up/Down | F: Focus Home\nEscape: Toggle Mouse | F1: Toggle Debug\nInsert: Menu | R: Reconnect"),
                 TextFont {
                     font: font_handle.clone(),
                     font_size: app_config.ui.ui_font_size * 0.7,
@@ -119,9 +122,6 @@ pub fn setup_ui(
             ));
         });
 }
-
-#[derive(Component)]
-pub struct GameStateText;
 
 pub fn update_fps_text(
     diagnostics: Res<DiagnosticsStore>,
@@ -142,8 +142,13 @@ pub fn update_connection_text(
 ) {
     for (mut text, mut color) in &mut query {
         if connection_state.connected {
-            text.0 = "Connected".to_string();
-            color.0 = Color::srgb(0.0, 1.0, 0.0);
+            if connection_state.registered {
+                text.0 = format!("Connected & Registered");
+                color.0 = Color::srgb(0.0, 1.0, 0.0);
+            } else {
+                text.0 = "Connected - Registering...".to_string();
+                color.0 = Color::srgb(1.0, 1.0, 0.0);
+            }
         } else {
             text.0 = format!("Disconnected: {}", connection_state.connection_message);
             color.0 = Color::srgb(1.0, 0.0, 0.0);
@@ -166,14 +171,54 @@ pub fn update_game_state_text(
     mut query: Query<&mut Text, With<GameStateText>>,
 ) {
     for mut text in &mut query {
-        text.0 = format!(
-            "Score: {} | Level: {} | Time: {:.1}s\nPosition: ({:.1}, {:.1}, {:.1})",
-            game_state.score,
-            game_state.level,
-            game_state.time_remaining,
-            game_state.player_position.x,
-            game_state.player_position.y,
-            game_state.player_position.z
-        );
+        if game_state.connected {
+            let ant_count = game_state.my_ants.len();
+            let enemy_count = game_state.enemy_ants.len();
+            let food_count = game_state.food_on_map.len();
+            let visible_tiles = game_state.visible_tiles.len();
+
+            // Calculate ant type distribution
+            let mut worker_count = 0;
+            let mut soldier_count = 0;
+            let mut scout_count = 0;
+
+            for ant in game_state.my_ants.values() {
+                match ant.ant_type {
+                    AntType::Worker => worker_count += 1,
+                    AntType::Soldier => soldier_count += 1,
+                    AntType::Scout => scout_count += 1,
+                }
+            }
+
+            // Calculate total food being carried
+            let mut carrying_food = 0;
+            for ant in game_state.my_ants.values() {
+                if let Some((_, amount)) = ant.food {
+                    carrying_food += amount;
+                }
+            }
+
+            text.0 = format!(
+                "Turn: {} | Score: {} | Next turn: {:.1}s
+Ants: {} (W:{} S:{} Sc:{}) | Enemies: {} | Food: {}
+Carrying: {} | Visible tiles: {}
+Home: ({}, {})",
+                game_state.turn_number,
+                game_state.score,
+                game_state.next_turn_in,
+                ant_count,
+                worker_count,
+                soldier_count,
+                scout_count,
+                enemy_count,
+                food_count,
+                carrying_food,
+                visible_tiles,
+                game_state.main_spot.q,
+                game_state.main_spot.r
+            );
+        } else {
+            text.0 = "Game State: Disconnected".to_string();
+        }
     }
 }
