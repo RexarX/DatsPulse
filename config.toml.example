@@ -1,0 +1,36 @@
+[server]
+url = "url"
+token = "token"
+tick_rate_ms = 1000
+auto_reconnect = true
+timeout_seconds = 10
+
+[renderer]
+target_fps = 0
+vsync = true
+resolution = [1280, 720]
+window_mode = "windowed"
+anisotropic_filtering = 16
+anti_aliasing = "msaa4"
+ssao_enabled = true
+clear_color = [0.0, 0.0, 0.0]
+
+[camera]
+movement_speed = 5.0
+sprint_multiplier = 2.0
+mouse_sensitivity = 0.002
+fov = 80.0
+
+[ui]
+show_fps = true
+show_connection = true
+show_debug_text = true
+show_game_state = true
+enable_docking = true
+menu_font_size = 16.0
+ui_font_size = 20.0
+menu_title = "Debug Menu"
+
+[debug]
+debug_mode = false
+log_level = "info"

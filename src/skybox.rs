@@ -8,7 +8,7 @@ use bevy::{
 #[derive(Resource)]
 pub struct SkyboxManager {
     pub current_skybox: SkyboxType,
-    pub skybox_handles: Vec<Handle<Image>>,
+    pub skybox_handle: Option<Handle<Image>>,
     pub is_loaded: bool,
     pub fallback_applied: bool,
 }
@@ -23,7 +23,7 @@ impl Default for SkyboxManager {
     fn default() -> Self {
         Self {
             current_skybox: SkyboxType::Cubemap,
-            skybox_handles: Vec::new(),
+            skybox_handle: None,
             is_loaded: false,
             fallback_applied: false,
         }
@@ -34,100 +34,107 @@ pub fn setup_skybox(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
     mut skybox_manager: ResMut<SkyboxManager>,
-    mut camera_query: Query<Entity, With<GameCamera>>,
 ) {
     // Try to load the vertical strip cubemap
-    let cubemap_path = "textures/skybox/cubemap_strip.png";
-    let cubemap_handle = asset_server.load(cubemap_path);
-    skybox_manager.skybox_handles.clear();
-    skybox_manager.skybox_handles.push(cubemap_handle.clone());
+    let cubemap_handle = asset_server.load("textures/skybox/cubemap_strip.png");
+    skybox_manager.skybox_handle = Some(cubemap_handle);
 
-    // Attach Skybox component to your camera(s)
-    for camera_entity in camera_query.iter_mut() {
-        commands.entity(camera_entity).insert(Skybox {
-            image: cubemap_handle.clone(),
-            brightness: 1000.0,
-            ..default()
-        });
-    }
+    info!("Attempting to load skybox from: textures/skybox/cubemap_strip.png");
 }
 
 pub fn update_skybox(
     asset_server: Res<AssetServer>,
     mut images: ResMut<Assets<Image>>,
     mut skybox_manager: ResMut<SkyboxManager>,
-    mut camera_query: Query<&mut Skybox, With<GameCamera>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut camera_query: Query<Entity, (With<GameCamera>, Without<Skybox>)>,
+    mut commands: Commands,
 ) {
     if skybox_manager.is_loaded {
         return;
     }
 
-    if skybox_manager.skybox_handles.is_empty() {
-        apply_fallback_skybox(&mut skybox_manager, &mut camera_query, &mut images);
+    let Some(skybox_handle) = &skybox_manager.skybox_handle else {
+        apply_fallback_skybox(
+            &mut skybox_manager,
+            &mut camera_query,
+            &mut images,
+            &mut commands,
+        );
         return;
-    }
-
-    let skybox_handle = &skybox_manager.skybox_handles[0];
+    };
 
     match asset_server.load_state(skybox_handle) {
         bevy::asset::LoadState::Loaded => {
-            info!("Loading skybox texture...");
+            info!("Skybox texture loaded, processing...");
 
             if let Some(image) = images.get_mut(skybox_handle) {
-                // Only reinterpret if it's a vertical strip (array_layer_count == 1)
+                // Only reinterpret if it's a 2D texture that needs to be converted to cubemap
                 if image.texture_descriptor.array_layer_count() == 1 {
-                    let layers = image.height() / image.width();
-                    if layers == 6 {
+                    let width = image.width();
+                    let height = image.height();
+
+                    // Check if this is a vertical strip (6:1 aspect ratio)
+                    if height == width * 6 {
+                        info!("Converting vertical strip to cubemap array");
                         image.reinterpret_stacked_2d_as_array(6);
                         image.texture_view_descriptor = Some(TextureViewDescriptor {
                             dimension: Some(TextureViewDimension::Cube),
                             ..default()
                         });
-
-                        // Apply skybox to all cameras
-                        for mut skybox in camera_query.iter_mut() {
-                            skybox.image = skybox_handle.clone();
-                            skybox.brightness = 1000.0;
-                        }
-
-                        skybox_manager.is_loaded = true;
-                        skybox_manager.current_skybox = SkyboxType::Cubemap;
-                        info!("Skybox loaded successfully!");
                     } else {
-                        error!(
-                            "Cubemap strip must have height = 6 * width! Got {}x{}",
-                            image.width(),
-                            image.height()
+                        error!("Skybox image dimensions incorrect. Expected height = 6 * width, got {}x{}", width, height);
+                        apply_fallback_skybox(
+                            &mut skybox_manager,
+                            &mut camera_query,
+                            &mut images,
+                            &mut commands,
                         );
-                        apply_fallback_skybox(&mut skybox_manager, &mut camera_query, &mut images);
+                        return;
                     }
-                } else {
-                    error!("Image already processed or invalid format");
-                    apply_fallback_skybox(&mut skybox_manager, &mut camera_query, &mut images);
                 }
+
+                // Apply skybox to all cameras without skybox
+                for camera_entity in camera_query.iter() {
+                    commands.entity(camera_entity).insert(Skybox {
+                        image: skybox_handle.clone(),
+                        brightness: 1000.0,
+                        ..default()
+                    });
+                }
+
+                skybox_manager.is_loaded = true;
+                skybox_manager.current_skybox = SkyboxType::Cubemap;
+                info!("Skybox applied successfully!");
             } else {
-                error!("Failed to get image from handle");
-                apply_fallback_skybox(&mut skybox_manager, &mut camera_query, &mut images);
+                error!("Failed to get skybox image from asset handle");
+                apply_fallback_skybox(
+                    &mut skybox_manager,
+                    &mut camera_query,
+                    &mut images,
+                    &mut commands,
+                );
             }
         }
-        bevy::asset::LoadState::Failed(_) => {
-            error!("Failed to load skybox texture, using fallback");
-            apply_fallback_skybox(&mut skybox_manager, &mut camera_query, &mut images);
+        bevy::asset::LoadState::Failed(err) => {
+            error!("Failed to load skybox texture: {:?}", err);
+            apply_fallback_skybox(
+                &mut skybox_manager,
+                &mut camera_query,
+                &mut images,
+                &mut commands,
+            );
         }
         _ => {
-            // Still loading, check if we should timeout and use fallback
-            if !skybox_manager.fallback_applied {
-                // You could add a timeout here if needed
-            }
+            // Still loading - we could add a timeout here if needed
         }
     }
 }
 
 fn apply_fallback_skybox(
     skybox_manager: &mut SkyboxManager,
-    camera_query: &mut Query<&mut Skybox, With<GameCamera>>,
+    camera_query: &mut Query<Entity, (With<GameCamera>, Without<Skybox>)>,
     images: &mut ResMut<Assets<Image>>,
+    commands: &mut Commands,
 ) {
     if skybox_manager.fallback_applied {
         return;
@@ -138,9 +145,12 @@ fn apply_fallback_skybox(
     // Create a simple black cubemap
     let black_image = create_black_cubemap(images);
 
-    for mut skybox in camera_query.iter_mut() {
-        skybox.image = black_image.clone();
-        skybox.brightness = 0.0; // Black skybox
+    for camera_entity in camera_query.iter() {
+        commands.entity(camera_entity).insert(Skybox {
+            image: black_image.clone(),
+            brightness: 0.0,
+            ..default()
+        });
     }
 
     skybox_manager.fallback_applied = true;
@@ -154,7 +164,7 @@ fn create_black_cubemap(images: &mut ResMut<Assets<Image>>) -> Handle<Image> {
     let size = 64;
     let mut data = vec![0u8; (size * size * 4 * 6) as usize]; // RGBA, 6 faces
 
-    // Fill with black (already 0, but being explicit)
+    // Fill with black
     for chunk in data.chunks_mut(4) {
         chunk[0] = 0; // R
         chunk[1] = 0; // G

@@ -1,4 +1,6 @@
+use crate::config::AppConfig;
 use crate::input::CameraController;
+use crate::renderer::RendererSettings;
 use crate::types::*;
 use bevy::diagnostic::{DiagnosticsStore, FrameTimeDiagnosticsPlugin};
 use bevy::prelude::*;
@@ -127,6 +129,8 @@ pub fn menu_ui_system(
     resolution_options: Res<ResolutionOptions>,
     mut reconnect_events: EventWriter<ReconnectRequestEvent>,
     mut app_config: ResMut<crate::config::AppConfig>,
+    mut renderer_settings: ResMut<RendererSettings>,
+    mut clear_color: ResMut<ClearColor>,
     // Add these for debug info
     game_state: Res<GameState>,
     connection_state: Res<ConnectionState>,
@@ -319,6 +323,236 @@ pub fn menu_ui_system(
 
             ui.separator();
 
+            // Renderer Settings
+            ui.collapsing("Renderer", |ui| {
+                ui.label("Target FPS:");
+                ui.horizontal(|ui| {
+                    if ui
+                        .radio_value(&mut app_config.renderer.target_fps, 30, "30")
+                        .changed()
+                    {
+                        renderer_settings.target_fps = 30;
+                    }
+                    if ui
+                        .radio_value(&mut app_config.renderer.target_fps, 60, "60")
+                        .changed()
+                    {
+                        renderer_settings.target_fps = 60;
+                    }
+                    if ui
+                        .radio_value(&mut app_config.renderer.target_fps, 120, "120")
+                        .changed()
+                    {
+                        renderer_settings.target_fps = 120;
+                    }
+                    if ui
+                        .radio_value(&mut app_config.renderer.target_fps, 144, "144")
+                        .changed()
+                    {
+                        renderer_settings.target_fps = 144;
+                    }
+                    if ui
+                        .radio_value(&mut app_config.renderer.target_fps, 0, "Unlimited")
+                        .changed()
+                    {
+                        renderer_settings.target_fps = 0;
+                    }
+                });
+
+                ui.separator();
+
+                ui.label("Anisotropic Filtering:");
+                ui.horizontal(|ui| {
+                    if ui
+                        .radio_value(&mut app_config.renderer.anisotropic_filtering, 1, "Off")
+                        .changed()
+                    {
+                        renderer_settings.anisotropic_filtering = 1;
+                    }
+                    if ui
+                        .radio_value(&mut app_config.renderer.anisotropic_filtering, 2, "2x")
+                        .changed()
+                    {
+                        renderer_settings.anisotropic_filtering = 2;
+                    }
+                    if ui
+                        .radio_value(&mut app_config.renderer.anisotropic_filtering, 4, "4x")
+                        .changed()
+                    {
+                        renderer_settings.anisotropic_filtering = 4;
+                    }
+                    if ui
+                        .radio_value(&mut app_config.renderer.anisotropic_filtering, 8, "8x")
+                        .changed()
+                    {
+                        renderer_settings.anisotropic_filtering = 8;
+                    }
+                    if ui
+                        .radio_value(&mut app_config.renderer.anisotropic_filtering, 16, "16x")
+                        .changed()
+                    {
+                        renderer_settings.anisotropic_filtering = 16;
+                    }
+                });
+
+                ui.separator();
+
+                ui.label("Anti-Aliasing:");
+                let mut aa_changed = false;
+                ui.horizontal(|ui| {
+                    if ui
+                        .radio_value(
+                            &mut app_config.renderer.anti_aliasing,
+                            "none".to_string(),
+                            "None",
+                        )
+                        .changed()
+                    {
+                        aa_changed = true;
+                    }
+                    if ui
+                        .radio_value(
+                            &mut app_config.renderer.anti_aliasing,
+                            "msaa2".to_string(),
+                            "MSAA 2x",
+                        )
+                        .changed()
+                    {
+                        aa_changed = true;
+                    }
+                    if ui
+                        .radio_value(
+                            &mut app_config.renderer.anti_aliasing,
+                            "msaa4".to_string(),
+                            "MSAA 4x",
+                        )
+                        .changed()
+                    {
+                        aa_changed = true;
+                    }
+                    if ui
+                        .radio_value(
+                            &mut app_config.renderer.anti_aliasing,
+                            "msaa8".to_string(),
+                            "MSAA 8x",
+                        )
+                        .changed()
+                    {
+                        aa_changed = true;
+                    }
+                });
+                ui.horizontal(|ui| {
+                    if ui
+                        .radio_value(
+                            &mut app_config.renderer.anti_aliasing,
+                            "fxaa".to_string(),
+                            "FXAA",
+                        )
+                        .changed()
+                    {
+                        aa_changed = true;
+                    }
+                    if ui
+                        .radio_value(
+                            &mut app_config.renderer.anti_aliasing,
+                            "smaa".to_string(),
+                            "SMAA",
+                        )
+                        .changed()
+                    {
+                        aa_changed = true;
+                    }
+                    if ui
+                        .radio_value(
+                            &mut app_config.renderer.anti_aliasing,
+                            "taa".to_string(),
+                            "TAA",
+                        )
+                        .changed()
+                    {
+                        aa_changed = true;
+                    }
+                });
+
+                if aa_changed {
+                    renderer_settings.current_aa = crate::renderer::AntiAliasingMode::from(
+                        app_config.renderer.anti_aliasing.as_str(),
+                    );
+                }
+
+                ui.separator();
+
+                if ui
+                    .checkbox(
+                        &mut app_config.renderer.ssao_enabled,
+                        "Screen Space Ambient Occlusion (SSAO)",
+                    )
+                    .changed()
+                {
+                    renderer_settings.current_ssao = app_config.renderer.ssao_enabled;
+                }
+
+                ui.separator();
+
+                ui.label("Clear Color:");
+                let mut color_changed = false;
+                ui.horizontal(|ui| {
+                    ui.label("R:");
+                    if ui
+                        .add(egui::Slider::new(
+                            &mut app_config.renderer.clear_color.0,
+                            0.0..=1.0,
+                        ))
+                        .changed()
+                    {
+                        color_changed = true;
+                    }
+                });
+                ui.horizontal(|ui| {
+                    ui.label("G:");
+                    if ui
+                        .add(egui::Slider::new(
+                            &mut app_config.renderer.clear_color.1,
+                            0.0..=1.0,
+                        ))
+                        .changed()
+                    {
+                        color_changed = true;
+                    }
+                });
+                ui.horizontal(|ui| {
+                    ui.label("B:");
+                    if ui
+                        .add(egui::Slider::new(
+                            &mut app_config.renderer.clear_color.2,
+                            0.0..=1.0,
+                        ))
+                        .changed()
+                    {
+                        color_changed = true;
+                    }
+                });
+
+                if color_changed {
+                    clear_color.0 = Color::srgb(
+                        app_config.renderer.clear_color.0,
+                        app_config.renderer.clear_color.1,
+                        app_config.renderer.clear_color.2,
+                    );
+                }
+
+                if ui.button("Apply All Renderer Settings").clicked() {
+                    apply_renderer_settings(
+                        &mut windows,
+                        &app_config,
+                        &mut renderer_settings,
+                        &mut clear_color,
+                    );
+                }
+            });
+
+            ui.separator();
+
             // Camera Settings
             ui.collapsing("Camera Settings", |ui| {
                 ui.label("Field of View:");
@@ -438,6 +672,54 @@ fn apply_display_settings(
             "Applied display settings: {}x{}, VSync: {:?}",
             width, height, window.present_mode
         );
+    }
+}
+
+fn apply_renderer_settings(
+    windows: &mut Query<&mut Window>,
+    app_config: &AppConfig,
+    renderer_settings: &mut RendererSettings,
+    clear_color: &mut ClearColor,
+) {
+    // Update renderer settings
+    renderer_settings.current_aa =
+        crate::renderer::AntiAliasingMode::from(app_config.renderer.anti_aliasing.as_str());
+    renderer_settings.current_ssao = app_config.renderer.ssao_enabled;
+    renderer_settings.target_fps = app_config.renderer.target_fps;
+    renderer_settings.anisotropic_filtering = app_config.renderer.anisotropic_filtering;
+
+    // Update clear color
+    clear_color.0 = Color::srgb(
+        app_config.renderer.clear_color.0,
+        app_config.renderer.clear_color.1,
+        app_config.renderer.clear_color.2,
+    );
+
+    // Update window settings
+    if let Ok(mut window) = windows.single_mut() {
+        window.resolution = bevy::window::WindowResolution::new(
+            app_config.renderer.resolution.0 as f32,
+            app_config.renderer.resolution.1 as f32,
+        );
+
+        window.present_mode = if app_config.renderer.vsync {
+            bevy::window::PresentMode::AutoVsync
+        } else {
+            bevy::window::PresentMode::AutoNoVsync
+        };
+
+        window.mode = match app_config.renderer.window_mode.as_str() {
+            "borderless" => bevy::window::WindowMode::BorderlessFullscreen(
+                bevy::window::MonitorSelection::Primary,
+            ),
+            "fullscreen" => bevy::window::WindowMode::Fullscreen(
+                bevy::window::MonitorSelection::Primary,
+                bevy::window::VideoModeSelection::Current,
+            ),
+            _ => bevy::window::WindowMode::Windowed,
+        };
+
+        info!("Applied all renderer settings");
     }
 }
 

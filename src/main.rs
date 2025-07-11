@@ -4,6 +4,7 @@ mod game;
 mod input;
 mod menu;
 mod plugins;
+mod renderer; // Add this line
 mod rendering;
 mod server;
 mod skybox;
@@ -12,8 +13,10 @@ mod types;
 mod ui;
 mod utils;
 
-use bevy::diagnostic::FrameTimeDiagnosticsPlugin;
-use bevy::prelude::*;
+use bevy::{
+    core_pipeline::experimental::taa::TemporalAntiAliasPlugin,
+    diagnostic::FrameTimeDiagnosticsPlugin, prelude::*,
+};
 use bevy_egui::EguiPlugin;
 use bevy_tokio_tasks::TokioTasksPlugin;
 use chrono::Local;
@@ -28,8 +31,6 @@ use tracing_subscriber::{EnvFilter, Layer, fmt};
 use types::*;
 
 fn main() -> anyhow::Result<()> {
-    dotenv::dotenv().ok();
-
     // Load configuration
     let config_path = Path::new("config.toml");
     let app_config = AppConfig::load_or_create(config_path)?;
@@ -103,9 +104,20 @@ fn main() -> anyhow::Result<()> {
         .init();
 
     // Create server configuration
+    if app_config.server.token.is_empty() || app_config.server.token == "your-token-here" {
+        eprintln!("ERROR: Please set your API token in config.toml under [server] token = \"...\"");
+        std::process::exit(1);
+    }
+
+    let clear_color = ClearColor(Color::srgb(
+        app_config.renderer.clear_color.0,
+        app_config.renderer.clear_color.1,
+        app_config.renderer.clear_color.2,
+    ));
+
     let server_config = ServerConfig {
         url: app_config.server.url.clone(),
-        token: config::get_api_token()?,
+        token: app_config.server.token.clone(),
         tick_rate: Duration::from_millis(app_config.server.tick_rate_ms),
         auto_reconnect: app_config.server.auto_reconnect,
     };
@@ -118,7 +130,16 @@ fn main() -> anyhow::Result<()> {
                 .set(WindowPlugin {
                     primary_window: Some(Window {
                         title: "DatsPulse - Ant Colony Strategy".to_string(),
-                        resolution: (1280.0, 720.0).into(),
+                        resolution: (
+                            app_config.renderer.resolution.0 as f32,
+                            app_config.renderer.resolution.1 as f32,
+                        )
+                            .into(),
+                        present_mode: if app_config.renderer.vsync {
+                            bevy::window::PresentMode::AutoVsync
+                        } else {
+                            bevy::window::PresentMode::AutoNoVsync
+                        },
                         ..default()
                     }),
                     ..default()
@@ -131,23 +152,25 @@ fn main() -> anyhow::Result<()> {
             TokioTasksPlugin::default(),
             EguiPlugin::default(),
         ))
-        // Custom plugins (events are now managed within each plugin)
+        // Custom plugins
         .add_plugins((
-            ServerPlugin,           // Handles all server communication and API events
-            GamePlugin,             // Handles game logic and game events
-            InputPlugin,            // Handles input processing
-            MenuPlugin,             // Handles UI menus
-            UiPlugin,               // Handles HUD and UI elements
-            RenderingPlugin,        // Handles 3D rendering
-            SkyboxPlugin,           // Handles skybox rendering
-            OcclusionCullingPlugin, // Handles occlusion culling
+            ServerPlugin,
+            GamePlugin,
+            InputPlugin,
+            TemporalAntiAliasPlugin,
+            MenuPlugin,
+            UiPlugin,
+            RenderingPlugin,
+            SkyboxPlugin,
+            OcclusionCullingPlugin,
+            RendererPlugin,
         ))
-        // Resources (shared state)
+        // Resources
+        .insert_resource(clear_color)
         .insert_resource(app_config)
         .insert_resource(server_config)
         .insert_resource(GameState::default())
         .insert_resource(ConnectionState::default())
-        // Run the application
         .run();
 
     Ok(())

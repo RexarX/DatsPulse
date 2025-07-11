@@ -6,6 +6,7 @@ use std::path::Path;
 #[derive(Debug, Clone, Serialize, Deserialize, Resource)]
 pub struct AppConfig {
     pub server: ServerConfig,
+    pub renderer: RendererConfig,
     pub camera: CameraConfig,
     pub ui: UiConfig,
     pub debug: DebugConfig,
@@ -46,27 +47,49 @@ pub struct DebugConfig {
     pub log_level: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RendererConfig {
+    pub target_fps: u32,
+    pub vsync: bool,
+    pub resolution: (u32, u32),
+    pub window_mode: String,        // "windowed", "borderless", "fullscreen"
+    pub anisotropic_filtering: u32, // 1, 2, 4, 8, 16
+    pub anti_aliasing: String,      // "none", "msaa2", "msaa4", "msaa8", "fxaa", "smaa", "taa"
+    pub ssao_enabled: bool,
+    pub clear_color: (f32, f32, f32),
+}
+
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
             server: ServerConfig {
                 url: "https://games-test.datsteam.dev/api".to_string(),
-                token: std::env::var("API_TOKEN").unwrap_or_else(|_| "your-token-here".to_string()),
+                token: "your-token-here".to_string(),
                 tick_rate_ms: 1000,
                 auto_reconnect: true,
                 timeout_seconds: 10,
             },
+            renderer: RendererConfig {
+                target_fps: 60,
+                vsync: true,
+                resolution: (1280, 720),
+                window_mode: "windowed".to_string(),
+                anisotropic_filtering: 16,
+                anti_aliasing: "msaa4".to_string(),
+                ssao_enabled: false,
+                clear_color: (0.0, 0.0, 0.0), // Black background
+            },
             camera: CameraConfig {
                 movement_speed: 5.0,
                 sprint_multiplier: 2.0,
-                mouse_sensitivity: 0.003,
+                mouse_sensitivity: 0.002,
                 fov: 75.0,
             },
             ui: UiConfig {
-                show_fps: false,        // Changed to false
-                show_connection: false, // Changed to false
-                show_debug_text: false, // Changed to false
-                show_game_state: false, // Changed to false
+                show_fps: false,
+                show_connection: false,
+                show_debug_text: false,
+                show_game_state: false,
                 enable_docking: true,
                 menu_font_size: 16.0,
                 ui_font_size: 20.0,
@@ -100,15 +123,5 @@ impl AppConfig {
         }
         fs::write(path, content)?;
         Ok(())
-    }
-}
-
-pub fn get_api_token() -> anyhow::Result<String> {
-    match std::env::var("API_TOKEN") {
-        Ok(token) if !token.is_empty() && token != "your-token-here" => Ok(token),
-        _ => Err(anyhow::anyhow!(
-            "API_TOKEN environment variable not set or invalid. \
-            Please create a .env file in your project root with:\n\nAPI_TOKEN=your-actual-token-here\n"
-        )),
     }
 }
