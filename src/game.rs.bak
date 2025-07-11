@@ -1,0 +1,596 @@
+use crate::types::*;
+use bevy::prelude::*;
+use std::collections::HashMap;
+use std::time::Duration;
+use tracing::debug;
+
+#[derive(Resource)]
+pub struct GameLogic {
+    update_count: u64,
+    last_action_time: std::time::Instant,
+    action_interval: Duration,
+    previous_global_assessment: Option<GlobalStrategyAssessment>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum GameStrategy {
+    Explore,
+    Gather,
+    Defend,
+    Attack,
+    Steal,
+}
+
+// Global colony-wide strategy assessment
+#[derive(Debug, Clone)]
+struct GlobalStrategyAssessment {
+    strategy_scores: HashMap<GameStrategy, f32>,
+    threat_level: f32,
+}
+
+// Individual ant strategy assessment
+#[derive(Debug, Clone)]
+struct AntStrategyAssessment {
+    strategy_scores: HashMap<GameStrategy, f32>,
+    ant_id: String,
+    special_opportunities: Vec<(GameStrategy, f32)>,
+}
+
+// Final strategy decision for an ant
+#[derive(Debug, Clone)]
+struct AntStrategyDecision {
+    ant_id: String,
+    selected_strategy: GameStrategy,
+    score: f32,
+}
+
+impl Default for GameLogic {
+    fn default() -> Self {
+        Self {
+            update_count: 0,
+            last_action_time: std::time::Instant::now(),
+            action_interval: Duration::from_millis(1500), // Slightly faster than server tick
+            previous_global_assessment: None,
+        }
+    }
+}
+
+pub fn setup_game_logic(mut commands: Commands) {
+    commands.insert_resource(GameLogic::default());
+}
+
+pub fn game_logic_system(
+    mut game_logic: ResMut<GameLogic>,
+    game_state: Res<GameState>,
+    mut move_events: EventWriter<MoveCommandEvent>,
+    _time: Res<Time>,
+) {
+    game_logic.update_count += 1;
+
+    // Only take action if enough time has passed
+    if game_logic.last_action_time.elapsed() < game_logic.action_interval {
+        return;
+    }
+
+    // Skip if not connected or no game data
+    if !game_state.connected || game_state.my_ants.is_empty() {
+        return;
+    }
+
+    // STEP 1: Assess global colony needs
+    let global_assessment = assess_global_needs(&game_state);
+
+    // Log if global strategy priority changes significantly
+    if let Some(previous_assessment) = &game_logic.previous_global_assessment {
+        if highest_strategy(&global_assessment) != highest_strategy(previous_assessment) {
+            debug!(
+                "Global strategy priority changed to: {:?}",
+                highest_strategy(&global_assessment)
+            );
+        }
+    }
+    game_logic.previous_global_assessment = Some(global_assessment.clone());
+
+    // STEP 2 & 3: Assess and decide for each individual ant
+    let mut ant_decisions = Vec::new();
+
+    for (ant_id, ant) in &game_state.my_ants {
+        // Assess individual ant situation
+        let ant_assessment = assess_individual_ant(ant, &game_state, &global_assessment);
+
+        // Make final strategy decision for this ant
+        let decision = decide_ant_strategy(ant, &ant_assessment, &global_assessment);
+        ant_decisions.push(decision);
+    }
+
+    // Execute movement based on strategy decisions
+    for decision in ant_decisions {
+        if let Some(path) = calculate_ant_move_by_strategy(
+            &game_state.my_ants[&decision.ant_id],
+            &game_state,
+            &decision.selected_strategy,
+        ) {
+            move_events.write(MoveCommandEvent {
+                ant_id: decision.ant_id.clone(),
+                path,
+            });
+        }
+    }
+
+    game_logic.last_action_time = std::time::Instant::now();
+
+    // Log progress periodically
+    if game_logic.update_count % 100 == 0 {
+        debug!("Game update #{}", game_logic.update_count);
+    }
+}
+
+// Helper to get highest priority strategy
+fn highest_strategy(assessment: &GlobalStrategyAssessment) -> GameStrategy {
+    assessment
+        .strategy_scores
+        .iter()
+        .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
+        .map(|(strategy, _)| strategy.clone())
+        .unwrap_or(GameStrategy::Explore)
+}
+
+// STEP 1: Assess global colony needs
+fn assess_global_needs(game_state: &GameState) -> GlobalStrategyAssessment {
+    let mut assessment = GlobalStrategyAssessment {
+        strategy_scores: HashMap::new(),
+        threat_level: 0.0,
+    };
+
+    // Initialize strategy scores
+    for strategy in [
+        GameStrategy::Explore,
+        GameStrategy::Gather,
+        GameStrategy::Defend,
+        GameStrategy::Attack,
+        GameStrategy::Steal,
+    ]
+    .iter()
+    {
+        assessment.strategy_scores.insert(strategy.clone(), 0.0);
+    }
+
+    // Calculate basic metrics
+    let ant_count = game_state.my_ants.len() as f32;
+    let enemy_count = game_state.enemy_ants.len() as f32;
+    let food_count = game_state.food_on_map.len() as f32;
+    let home_distance = calculate_average_distance_from_home(game_state);
+
+    // Base under attack assessment
+    let enemies_near_home = game_state
+        .enemy_ants
+        .values()
+        .filter(|enemy| enemy.position.distance_to(&game_state.main_spot) <= 3)
+        .count() as f32;
+
+    if enemies_near_home > 0.0 {
+        let base_threat = (enemies_near_home / (ant_count.max(1.0))).min(1.0);
+        assessment.threat_level = base_threat;
+        assessment
+            .strategy_scores
+            .insert(GameStrategy::Defend, 80.0 * base_threat);
+    }
+
+    // Resource assessment
+    if food_count > 0.0 {
+        let abundance = (food_count / ant_count.max(1.0)).min(1.0);
+        assessment
+            .strategy_scores
+            .insert(GameStrategy::Gather, 60.0 * abundance);
+    }
+
+    // Enemy assessment
+    if enemy_count > 0.0 && enemies_near_home == 0.0 {
+        let attack_score = 30.0 * (ant_count / enemy_count.max(1.0)).min(1.0);
+        assessment
+            .strategy_scores
+            .insert(GameStrategy::Attack, attack_score);
+    }
+
+    // Exploration always has some base priority
+    assessment
+        .strategy_scores
+        .insert(GameStrategy::Explore, 20.0);
+
+    // Simple steal opportunity assessment
+    if enemy_count > 0.0 && home_distance > 5.0 {
+        assessment.strategy_scores.insert(GameStrategy::Steal, 15.0);
+    }
+
+    assessment
+}
+
+fn calculate_average_distance_from_home(game_state: &GameState) -> f32 {
+    if game_state.my_ants.is_empty() {
+        return 0.0;
+    }
+
+    let total_distance: i32 = game_state
+        .my_ants
+        .values()
+        .map(|ant| ant.position.distance_to(&game_state.main_spot))
+        .sum();
+
+    total_distance as f32 / game_state.my_ants.len() as f32
+}
+
+// STEP 2: Assess individual ant situation
+fn assess_individual_ant(
+    ant: &Ant,
+    game_state: &GameState,
+    global_assessment: &GlobalStrategyAssessment,
+) -> AntStrategyAssessment {
+    let mut assessment = AntStrategyAssessment {
+        strategy_scores: global_assessment.strategy_scores.clone(), // Start with global scores
+        ant_id: ant.id.clone(),
+        special_opportunities: Vec::new(),
+    };
+
+    // Apply ant type specific modifiers
+    match ant.ant_type {
+        AntType::Worker => {
+            // Workers prioritize gathering
+            *assessment
+                .strategy_scores
+                .get_mut(&GameStrategy::Gather)
+                .unwrap() += 20.0;
+            // Workers are less suited for attack
+            *assessment
+                .strategy_scores
+                .get_mut(&GameStrategy::Attack)
+                .unwrap() -= 20.0;
+        }
+        AntType::Soldier => {
+            // Soldiers prioritize defense and attack
+            *assessment
+                .strategy_scores
+                .get_mut(&GameStrategy::Defend)
+                .unwrap() += 30.0;
+            *assessment
+                .strategy_scores
+                .get_mut(&GameStrategy::Attack)
+                .unwrap() += 30.0;
+            // Soldiers are less suited for gathering
+            *assessment
+                .strategy_scores
+                .get_mut(&GameStrategy::Gather)
+                .unwrap() -= 20.0;
+        }
+        AntType::Scout => {
+            // Scouts prioritize exploration
+            *assessment
+                .strategy_scores
+                .get_mut(&GameStrategy::Explore)
+                .unwrap() += 40.0;
+            // Scouts are suited for stealing
+            *assessment
+                .strategy_scores
+                .get_mut(&GameStrategy::Steal)
+                .unwrap() += 20.0;
+        }
+    }
+
+    // Health-based adjustments
+    let health_ratio = ant.health as f32 / ant.ant_type.health() as f32;
+    if health_ratio < 0.4 {
+        // Low health ants should avoid combat
+        *assessment
+            .strategy_scores
+            .get_mut(&GameStrategy::Attack)
+            .unwrap() -= 40.0;
+        *assessment
+            .strategy_scores
+            .get_mut(&GameStrategy::Defend)
+            .unwrap() -= 20.0;
+    }
+
+    // If carrying food, prioritize returning to base
+    if ant.food.is_some() {
+        assessment
+            .special_opportunities
+            .push((GameStrategy::Gather, 90.0));
+    }
+
+    // Check proximity to food for special gathering opportunity
+    for food in game_state.food_on_map.values() {
+        let distance = ant.position.distance_to(&food.position);
+        if distance <= 2 {
+            // Close to food - prioritize gathering
+            assessment
+                .special_opportunities
+                .push((GameStrategy::Gather, 70.0));
+            break;
+        }
+    }
+
+    assessment
+}
+
+// STEP 3: Make final strategy decision for an ant
+fn decide_ant_strategy(
+    ant: &Ant,
+    ant_assessment: &AntStrategyAssessment,
+    global_assessment: &GlobalStrategyAssessment,
+) -> AntStrategyDecision {
+    // Start with individual ant scores
+    let mut final_scores = ant_assessment.strategy_scores.clone();
+
+    // Apply special opportunity bonuses
+    for (strategy, score) in &ant_assessment.special_opportunities {
+        *final_scores.get_mut(strategy).unwrap() += score;
+    }
+
+    // Apply global threat override for defending
+    if global_assessment.threat_level > 0.7 && ant.ant_type == AntType::Soldier {
+        *final_scores.get_mut(&GameStrategy::Defend).unwrap() += 100.0;
+    }
+
+    // Select highest scoring strategy
+    let (best_strategy, best_score) = final_scores
+        .iter()
+        .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
+        .map(|(s, v)| (s.clone(), *v))
+        .unwrap_or((GameStrategy::Explore, 0.0));
+
+    AntStrategyDecision {
+        ant_id: ant.id.clone(),
+        selected_strategy: best_strategy,
+        score: best_score,
+    }
+}
+
+// Calculate ant movement based on decided strategy
+fn calculate_ant_move_by_strategy(
+    ant: &Ant,
+    game_state: &GameState,
+    strategy: &GameStrategy,
+) -> Option<Vec<HexCoord>> {
+    match strategy {
+        GameStrategy::Explore => calculate_explore_move(ant, game_state),
+        GameStrategy::Gather => calculate_gather_move(ant, game_state),
+        GameStrategy::Defend => calculate_defend_move(ant, game_state),
+        GameStrategy::Attack => calculate_attack_move(ant, game_state),
+        GameStrategy::Steal => calculate_steal_move(ant, game_state),
+    }
+}
+
+fn calculate_explore_move(ant: &Ant, game_state: &GameState) -> Option<Vec<HexCoord>> {
+    // Find unexplored areas or move randomly
+    let current_pos = ant.position;
+    let max_distance = ant.ant_type.speed();
+
+    // Look for edges of known map to explore
+    let mut best_target = None;
+    let mut best_score = 0;
+
+    for (pos, _tile) in &game_state.visible_tiles {
+        let distance = current_pos.distance_to(pos);
+        if distance <= max_distance {
+            // Score based on distance from home and current position
+            let home_distance = pos.distance_to(&game_state.main_spot);
+            let score = home_distance - distance;
+            if score > best_score {
+                best_score = score;
+                best_target = Some(*pos);
+            }
+        }
+    }
+
+    if let Some(target) = best_target {
+        PathFinder::find_path(current_pos, target, &game_state.visible_tiles, max_distance)
+    } else {
+        // Random exploration
+        let neighbors = current_pos.neighbors();
+        if let Some(neighbor) = neighbors.into_iter().find(|pos| {
+            game_state
+                .visible_tiles
+                .get(pos)
+                .map(|tile| tile.movement_cost.is_some())
+                .unwrap_or(false)
+        }) {
+            Some(vec![current_pos, neighbor])
+        } else {
+            None
+        }
+    }
+}
+
+fn calculate_gather_move(ant: &Ant, game_state: &GameState) -> Option<Vec<HexCoord>> {
+    let current_pos = ant.position;
+    let max_distance = ant.ant_type.speed();
+
+    // If carrying food, return to home
+    if ant.food.is_some() {
+        return find_closest_home_path(current_pos, game_state, max_distance);
+    }
+
+    // Find closest food
+    let mut closest_food = None;
+    let mut closest_distance = i32::MAX;
+
+    for food in game_state.food_on_map.values() {
+        let distance = current_pos.distance_to(&food.position);
+        if distance < closest_distance {
+            closest_distance = distance;
+            closest_food = Some(food.position);
+        }
+    }
+
+    if let Some(food_pos) = closest_food {
+        PathFinder::find_path(
+            current_pos,
+            food_pos,
+            &game_state.visible_tiles,
+            max_distance,
+        )
+    } else {
+        // No food visible, explore
+        calculate_explore_move(ant, game_state)
+    }
+}
+
+fn calculate_defend_move(ant: &Ant, game_state: &GameState) -> Option<Vec<HexCoord>> {
+    let current_pos = ant.position;
+    let max_distance = ant.ant_type.speed();
+
+    // Find closest enemy
+    let mut closest_enemy = None;
+    let mut closest_distance = i32::MAX;
+
+    for enemy in game_state.enemy_ants.values() {
+        let distance = current_pos.distance_to(&enemy.position);
+        if distance < closest_distance {
+            closest_distance = distance;
+            closest_enemy = Some(enemy.position);
+        }
+    }
+
+    if let Some(enemy_pos) = closest_enemy {
+        // Move towards enemy (for attack) or defensive position
+        let target = if closest_distance > 2 {
+            enemy_pos // Chase if far
+        } else {
+            game_state.main_spot // Retreat to home if close
+        };
+
+        PathFinder::find_path(current_pos, target, &game_state.visible_tiles, max_distance)
+    } else {
+        // No enemies visible, patrol around home
+        let home_neighbors = game_state.main_spot.neighbors();
+        if let Some(patrol_pos) = home_neighbors.into_iter().find(|pos| {
+            game_state
+                .visible_tiles
+                .get(pos)
+                .map(|tile| tile.movement_cost.is_some())
+                .unwrap_or(false)
+        }) {
+            PathFinder::find_path(
+                current_pos,
+                patrol_pos,
+                &game_state.visible_tiles,
+                max_distance,
+            )
+        } else {
+            None
+        }
+    }
+}
+
+fn calculate_attack_move(ant: &Ant, game_state: &GameState) -> Option<Vec<HexCoord>> {
+    let current_pos = ant.position;
+    let max_distance = ant.ant_type.speed();
+
+    // Find weakest enemy or closest enemy
+    let mut target_enemy = None;
+    let mut best_score = i32::MIN;
+
+    for enemy in game_state.enemy_ants.values() {
+        let distance = current_pos.distance_to(&enemy.position);
+        // Score: prioritize closer enemies and weaker enemies
+        let score = -distance * 10 - enemy.health;
+        if score > best_score {
+            best_score = score;
+            target_enemy = Some(enemy.position);
+        }
+    }
+
+    if let Some(enemy_pos) = target_enemy {
+        PathFinder::find_path(
+            current_pos,
+            enemy_pos,
+            &game_state.visible_tiles,
+            max_distance,
+        )
+    } else {
+        // No enemies, switch to gathering
+        calculate_gather_move(ant, game_state)
+    }
+}
+
+// New strategy implementation: Steal from enemy base
+fn calculate_steal_move(ant: &Ant, game_state: &GameState) -> Option<Vec<HexCoord>> {
+    let current_pos = ant.position;
+    let max_distance = ant.ant_type.speed();
+
+    // If carrying food, return to home - same as gather strategy
+    if ant.food.is_some() {
+        return find_closest_home_path(current_pos, game_state, max_distance);
+    }
+
+    // Simple enemy base detection - find cluster of enemy ants
+    let mut enemy_cluster = None;
+    let mut max_cluster_size = 0;
+
+    for enemy in game_state.enemy_ants.values() {
+        let nearby_enemies = game_state
+            .enemy_ants
+            .values()
+            .filter(|e| e.position.distance_to(&enemy.position) <= 2)
+            .count();
+
+        if nearby_enemies > max_cluster_size {
+            max_cluster_size = nearby_enemies;
+            enemy_cluster = Some(enemy.position);
+        }
+    }
+
+    if let Some(target) = enemy_cluster {
+        // Move toward enemy cluster
+        PathFinder::find_path(current_pos, target, &game_state.visible_tiles, max_distance)
+    } else {
+        // If no enemy cluster found, fall back to attack strategy
+        calculate_attack_move(ant, game_state)
+    }
+}
+
+fn find_closest_home_path(
+    current_pos: HexCoord,
+    game_state: &GameState,
+    max_distance: i32,
+) -> Option<Vec<HexCoord>> {
+    let mut closest_home = None;
+    let mut closest_distance = i32::MAX;
+
+    for home_pos in &game_state.home_tiles {
+        let distance = current_pos.distance_to(home_pos);
+        if distance < closest_distance {
+            closest_distance = distance;
+            closest_home = Some(*home_pos);
+        }
+    }
+
+    if let Some(home_pos) = closest_home {
+        PathFinder::find_path(
+            current_pos,
+            home_pos,
+            &game_state.visible_tiles,
+            max_distance,
+        )
+    } else {
+        None
+    }
+}
+
+// Helper function to check if position is safe
+fn is_position_safe(pos: &HexCoord, game_state: &GameState) -> bool {
+    // Check if any enemies are nearby
+    for enemy in game_state.enemy_ants.values() {
+        if enemy.position.distance_to(pos) <= 2 {
+            return false;
+        }
+    }
+
+    // Check if tile is dangerous
+    if let Some(tile) = game_state.visible_tiles.get(pos) {
+        if tile.tile_type.damage() > 0 {
+            return false;
+        }
+    }
+
+    true
+}

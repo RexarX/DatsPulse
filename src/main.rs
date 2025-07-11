@@ -7,6 +7,7 @@ mod plugins;
 mod rendering;
 mod server;
 mod skybox;
+mod strategy;
 mod types;
 mod ui;
 mod utils;
