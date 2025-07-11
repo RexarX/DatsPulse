@@ -1,6 +1,6 @@
 use crate::types::*;
+use crate::utils::*;
 use bevy::prelude::*;
-use std::collections::HashMap;
 use std::time::Duration;
 use tracing::debug;
 
@@ -154,7 +154,7 @@ fn calculate_explore_move(ant: &Ant, game_state: &GameState) -> Option<Vec<HexCo
             game_state
                 .visible_tiles
                 .get(pos)
-                .map(|tile| tile.movement_cost.is_some())
+                .map(|tile| tile.tile_type.is_passable())
                 .unwrap_or(false)
         }) {
             Some(vec![current_pos, neighbor])
@@ -230,7 +230,7 @@ fn calculate_defend_move(ant: &Ant, game_state: &GameState) -> Option<Vec<HexCoo
             game_state
                 .visible_tiles
                 .get(pos)
-                .map(|tile| tile.movement_cost.is_some())
+                .map(|tile| tile.cost != 0)
                 .unwrap_or(false)
         }) {
             PathFinder::find_path(

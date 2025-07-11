@@ -6,7 +6,9 @@ pub struct MenuPlugin;
 
 impl Plugin for MenuPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, setup_menu)
+        app
+            // Menu plugin doesn't need specific events currently
+            .add_systems(Startup, setup_menu)
             .add_systems(
                 Update,
                 (

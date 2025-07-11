@@ -9,6 +9,7 @@ mod server;
 mod skybox;
 mod types;
 mod ui;
+mod utils;
 
 use bevy::diagnostic::FrameTimeDiagnosticsPlugin;
 use bevy::prelude::*;
@@ -38,17 +39,18 @@ fn main() -> anyhow::Result<()> {
     // Date and time for log file
     let date = Local::now().format("%Y-%m-%d_%H-%M-%S").to_string();
 
-    // Setup logging (unchanged)
+    // Setup logging
     let general_log =
         RollingFileAppender::new(Rotation::NEVER, "logs", format!("{}_general.log", date));
     let server_log =
         RollingFileAppender::new(Rotation::NEVER, "logs", format!("{}_server.log", date));
 
     let filter_general = EnvFilter::new(
-        "info,\
+        "debug,\
         server=info,\
         wgpu=off,\
         naga=off,\
+        cosmic_text=off,\
         bevy_render=info,\
         bevy_ecs=info,\
         bevy_app=info,\
@@ -63,10 +65,11 @@ fn main() -> anyhow::Result<()> {
     let filter_server = EnvFilter::new("server=info");
 
     let filter_stdout = EnvFilter::new(
-        "info,\
+        "debug,\
         server=info,\
         wgpu=off,\
         naga=off,\
+        cosmic_text=off,\
         bevy_render=info,\
         bevy_ecs=info,\
         bevy_app=info,\
@@ -98,51 +101,52 @@ fn main() -> anyhow::Result<()> {
         .with(server_layer)
         .init();
 
+    // Create server configuration
     let server_config = ServerConfig {
         url: app_config.server.url.clone(),
-        token: app_config.server.token.clone(),
+        token: config::get_api_token()?,
         tick_rate: Duration::from_millis(app_config.server.tick_rate_ms),
         auto_reconnect: app_config.server.auto_reconnect,
     };
 
+    // Build and run the Bevy app
     App::new()
+        // Core Bevy plugins
         .add_plugins(
             DefaultPlugins
                 .set(WindowPlugin {
                     primary_window: Some(Window {
-                        title: "DatsPulse".to_string(),
+                        title: "DatsPulse - Ant Colony Strategy".to_string(),
                         resolution: (1280.0, 720.0).into(),
                         ..default()
                     }),
                     ..default()
                 })
-                .disable::<bevy::log::LogPlugin>(),
+                .disable::<bevy::log::LogPlugin>(), // We use our own logging
         )
-        .add_plugins(FrameTimeDiagnosticsPlugin::default())
-        .add_plugins(TokioTasksPlugin::default())
-        .add_plugins(EguiPlugin::default())
-        // Custom Plugins
+        // External plugins
         .add_plugins((
-            InputPlugin,
-            MenuPlugin,
-            UiPlugin,
-            GamePlugin,
-            ServerPlugin,
-            RenderingPlugin,
-            SkyboxPlugin,
-            OcclusionCullingPlugin,
+            FrameTimeDiagnosticsPlugin::default(),
+            TokioTasksPlugin::default(),
+            EguiPlugin::default(),
         ))
-        // Resources
+        // Custom plugins (events are now managed within each plugin)
+        .add_plugins((
+            ServerPlugin,           // Handles all server communication and API events
+            GamePlugin,             // Handles game logic and game events
+            InputPlugin,            // Handles input processing
+            MenuPlugin,             // Handles UI menus
+            UiPlugin,               // Handles HUD and UI elements
+            RenderingPlugin,        // Handles 3D rendering
+            SkyboxPlugin,           // Handles skybox rendering
+            OcclusionCullingPlugin, // Handles occlusion culling
+        ))
+        // Resources (shared state)
         .insert_resource(app_config)
         .insert_resource(server_config)
         .insert_resource(GameState::default())
         .insert_resource(ConnectionState::default())
-        // Events
-        .add_event::<GameActionEvent>()
-        .add_event::<ConnectionEvent>()
-        .add_event::<ReconnectRequestEvent>()
-        .add_event::<RegisterRequestEvent>()
-        .add_event::<MoveCommandEvent>()
+        // Run the application
         .run();
 
     Ok(())

@@ -1,5 +1,6 @@
 use crate::input::CameraController;
 use crate::types::*;
+use bevy::diagnostic::{DiagnosticsStore, FrameTimeDiagnosticsPlugin};
 use bevy::prelude::*;
 use bevy::window::{CursorGrabMode, MonitorSelection, PresentMode, WindowMode, WindowResolution};
 use bevy_egui::{EguiContexts, egui};
@@ -48,10 +49,10 @@ impl Default for MenuState {
     fn default() -> Self {
         Self {
             show_menu: false,
-            show_fps: true,
-            show_connection: true,
-            show_debug_text: true,
-            show_game_state: true,
+            show_fps: false,        // Hidden by default
+            show_connection: false, // Hidden by default
+            show_debug_text: false, // Hidden by default
+            show_game_state: false, // Hidden by default
             debug_mode: false,
             fov: 75.0,
             selected_resolution: 2,
@@ -126,6 +127,10 @@ pub fn menu_ui_system(
     resolution_options: Res<ResolutionOptions>,
     mut reconnect_events: EventWriter<ReconnectRequestEvent>,
     mut app_config: ResMut<crate::config::AppConfig>,
+    // Add these for debug info
+    game_state: Res<GameState>,
+    connection_state: Res<ConnectionState>,
+    diagnostics: Res<DiagnosticsStore>,
 ) -> Result {
     if !menu_state.show_menu {
         return Ok(());
@@ -153,35 +158,77 @@ pub fn menu_ui_system(
     ctx.set_style(style);
 
     egui::Window::new(&app_config.ui.menu_title)
-        .default_width(500.0)
-        .default_height(700.0)
+        .default_width(600.0)
+        .default_height(800.0)
         .resizable(true)
         .collapsible(true)
         .show(ctx, |ui| {
             ui.heading("Game Settings");
             ui.separator();
 
-            // UI Settings
-            ui.collapsing("UI Settings", |ui| {
-                ui.checkbox(&mut menu_state.show_fps, "Show FPS");
-                ui.checkbox(&mut menu_state.show_connection, "Show Connection Status");
-                ui.checkbox(&mut menu_state.show_debug_text, "Show Debug Text");
-                ui.checkbox(&mut menu_state.show_game_state, "Show Game State");
+            // Game Status Section
+            ui.collapsing("Game Status", |ui| {
+                // FPS
+                if let Some(fps) = diagnostics.get(&FrameTimeDiagnosticsPlugin::FPS) {
+                    if let Some(average) = fps.average() {
+                        ui.label(format!("FPS: {:.1}", average));
+                    }
+                }
 
-                ui.separator();
+                // Connection Status
+                if connection_state.connected {
+                    ui.colored_label(egui::Color32::GREEN, "Status: Connected & Registered");
+                } else {
+                    ui.colored_label(
+                        egui::Color32::RED,
+                        format!("Status: {}", connection_state.connection_message),
+                    );
+                }
 
-                ui.label("Menu Font Size:");
-                ui.add(
-                    egui::Slider::new(&mut app_config.ui.menu_font_size, 10.0..=30.0).suffix("px"),
-                );
+                // Game State Info
+                if game_state.connected {
+                    let ant_count = game_state.my_ants.len();
+                    let enemy_count = game_state.enemy_ants.len();
+                    let food_count = game_state.food_on_map.len();
+                    let visible_tiles = game_state.visible_tiles.len();
 
-                ui.label("UI Font Size:");
-                ui.add(
-                    egui::Slider::new(&mut app_config.ui.ui_font_size, 12.0..=32.0).suffix("px"),
-                );
+                    // Calculate ant type distribution
+                    let mut worker_count = 0;
+                    let mut soldier_count = 0;
+                    let mut scout_count = 0;
+                    let mut carrying_food = 0;
 
-                ui.label("Menu Title:");
-                ui.text_edit_singleline(&mut app_config.ui.menu_title);
+                    for ant in game_state.my_ants.values() {
+                        match ant.ant_type {
+                            AntType::Worker => worker_count += 1,
+                            AntType::Soldier => soldier_count += 1,
+                            AntType::Scout => scout_count += 1,
+                        }
+                        carrying_food += ant.food.amount;
+                    }
+
+                    ui.separator();
+                    ui.label(format!(
+                        "Turn: {} | Score: {}",
+                        game_state.turn_number, game_state.score
+                    ));
+                    ui.label(format!("Next turn: {:.1}s", game_state.next_turn_in));
+                    ui.label(format!(
+                        "Ants: {} (W:{} S:{} Sc:{})",
+                        ant_count, worker_count, soldier_count, scout_count
+                    ));
+                    ui.label(format!("Enemies: {} | Food: {}", enemy_count, food_count));
+                    ui.label(format!(
+                        "Carrying: {} | Visible tiles: {}",
+                        carrying_food, visible_tiles
+                    ));
+                    ui.label(format!(
+                        "Home: ({}, {})",
+                        game_state.main_spot.q, game_state.main_spot.r
+                    ));
+                } else {
+                    ui.label("Game State: Disconnected");
+                }
             });
 
             ui.separator();
@@ -190,6 +237,16 @@ pub fn menu_ui_system(
             ui.collapsing("Debug Settings", |ui| {
                 ui.checkbox(&mut menu_state.debug_mode, "Debug Mode");
                 ui.label("Toggle debug rendering and information");
+
+                ui.separator();
+                ui.label("Debug Rendering Options:");
+                ui.checkbox(&mut menu_state.show_fps, "Show FPS Overlay");
+                ui.checkbox(
+                    &mut menu_state.show_connection,
+                    "Show Connection Status Overlay",
+                );
+                ui.checkbox(&mut menu_state.show_debug_text, "Show Debug Text Overlay");
+                ui.checkbox(&mut menu_state.show_game_state, "Show Game State Overlay");
             });
 
             ui.separator();
@@ -255,50 +312,6 @@ pub fn menu_ui_system(
                     );
                 });
 
-                // Framerate Limit
-                ui.label("Framerate Limit:");
-                egui::ComboBox::from_id_salt("framerate_combo")
-                    .selected_text(match menu_state.framerate_limit {
-                        FramerateLimit::Unlimited => "Unlimited",
-                        FramerateLimit::Limit30 => "30 FPS",
-                        FramerateLimit::Limit60 => "60 FPS",
-                        FramerateLimit::Limit120 => "120 FPS",
-                        FramerateLimit::Limit144 => "144 FPS",
-                        FramerateLimit::Limit240 => "240 FPS",
-                    })
-                    .show_ui(ui, |ui| {
-                        ui.selectable_value(
-                            &mut menu_state.framerate_limit,
-                            FramerateLimit::Unlimited,
-                            "Unlimited",
-                        );
-                        ui.selectable_value(
-                            &mut menu_state.framerate_limit,
-                            FramerateLimit::Limit30,
-                            "30 FPS",
-                        );
-                        ui.selectable_value(
-                            &mut menu_state.framerate_limit,
-                            FramerateLimit::Limit60,
-                            "60 FPS",
-                        );
-                        ui.selectable_value(
-                            &mut menu_state.framerate_limit,
-                            FramerateLimit::Limit120,
-                            "120 FPS",
-                        );
-                        ui.selectable_value(
-                            &mut menu_state.framerate_limit,
-                            FramerateLimit::Limit144,
-                            "144 FPS",
-                        );
-                        ui.selectable_value(
-                            &mut menu_state.framerate_limit,
-                            FramerateLimit::Limit240,
-                            "240 FPS",
-                        );
-                    });
-
                 if ui.button("Apply Display Settings").clicked() {
                     apply_display_settings(&mut windows, &resolution_options, &menu_state);
                 }
@@ -347,7 +360,7 @@ pub fn menu_ui_system(
 
             ui.separator();
 
-            // Save/Load Configuration
+            // Configuration
             ui.collapsing("Configuration", |ui| {
                 if ui.button("Save Configuration").clicked() {
                     if let Err(e) = app_config.save(std::path::Path::new("config.toml")) {
@@ -357,6 +370,30 @@ pub fn menu_ui_system(
                     }
                 }
                 ui.label("Save current settings to config.toml");
+            });
+
+            ui.separator();
+
+            // Controls Info
+            ui.collapsing("Controls", |ui| {
+                ui.label("Camera Controls:");
+                ui.label("  WASD: Move camera");
+                ui.label("  Space/Ctrl: Up/Down");
+                ui.label("  Mouse: Look around (when enabled)");
+                ui.label("  Shift: Sprint");
+                ui.separator();
+                ui.label("Game Controls:");
+                ui.label("  F: Focus on home");
+                ui.label("  R: Reconnect to server");
+                ui.label("  L: Request game logs");
+                ui.label("  M: Send test move commands");
+                ui.separator();
+                ui.label("UI Controls:");
+                ui.label("  Insert: Toggle this menu");
+                ui.label("  Escape: Toggle mouse control");
+                ui.label("  F1: Toggle debug mode");
+                ui.label("  O: Toggle occlusion culling");
+                ui.label("  K: Show current skybox type");
             });
 
             ui.separator();

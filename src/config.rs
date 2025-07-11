@@ -50,7 +50,7 @@ impl Default for AppConfig {
     fn default() -> Self {
         Self {
             server: ServerConfig {
-                url: "https://games-test.datsteam.dev".to_string(),
+                url: "https://games-test.datsteam.dev/api".to_string(),
                 token: std::env::var("API_TOKEN").unwrap_or_else(|_| "your-token-here".to_string()),
                 tick_rate_ms: 1000,
                 auto_reconnect: true,
@@ -63,14 +63,14 @@ impl Default for AppConfig {
                 fov: 75.0,
             },
             ui: UiConfig {
-                show_fps: true,
-                show_connection: true,
-                show_debug_text: true,
-                show_game_state: true,
+                show_fps: false,        // Changed to false
+                show_connection: false, // Changed to false
+                show_debug_text: false, // Changed to false
+                show_game_state: false, // Changed to false
                 enable_docking: true,
                 menu_font_size: 16.0,
                 ui_font_size: 20.0,
-                menu_title: "Debug Menu".to_string(),
+                menu_title: "DatsPulse Settings".to_string(),
             },
             debug: DebugConfig {
                 debug_mode: false,

@@ -32,7 +32,7 @@ pub fn setup_ui(
             ..default()
         })
         .with_children(|parent| {
-            // FPS Text
+            // FPS Text (hidden by default)
             parent.spawn((
                 Text::new("FPS: 0"),
                 TextFont {
@@ -48,9 +48,10 @@ pub fn setup_ui(
                     ..default()
                 },
                 FpsText,
+                Visibility::Hidden, // Hidden by default
             ));
 
-            // Connection Status
+            // Connection Status (hidden by default)
             parent.spawn((
                 Text::new("Disconnected"),
                 TextFont {
@@ -66,9 +67,10 @@ pub fn setup_ui(
                     ..default()
                 },
                 ConnectionText,
+                Visibility::Hidden, // Hidden by default
             ));
 
-            // Debug Text
+            // Debug Text (hidden by default)
             parent.spawn((
                 Text::new("Debug: OFF"),
                 TextFont {
@@ -84,9 +86,10 @@ pub fn setup_ui(
                     ..default()
                 },
                 DebugText,
+                Visibility::Hidden, // Hidden by default
             ));
 
-            // Game State Info
+            // Game State Info (hidden by default)
             parent.spawn((
                 Text::new("Game State: Loading..."),
                 TextFont {
@@ -102,17 +105,18 @@ pub fn setup_ui(
                     ..default()
                 },
                 GameStateText,
+                Visibility::Hidden, // Hidden by default
             ));
 
-            // Controls Text
+            // Simplified controls text (always visible)
             parent.spawn((
-                Text::new("Controls:\nWASD: Camera | Space/Ctrl: Up/Down | F: Focus Home\nEscape: Toggle Mouse | F1: Toggle Debug\nInsert: Menu | R: Reconnect"),
+                Text::new("Press Insert to open menu"),
                 TextFont {
                     font: font_handle.clone(),
-                    font_size: app_config.ui.ui_font_size * 0.7,
+                    font_size: app_config.ui.ui_font_size * 0.8,
                     ..default()
                 },
-                TextColor(Color::srgb(0.7, 0.7, 0.7)),
+                TextColor(Color::srgb(0.9, 0.9, 0.9)),
                 Node {
                     position_type: PositionType::Absolute,
                     bottom: Val::Px(10.0),
@@ -193,9 +197,7 @@ pub fn update_game_state_text(
             // Calculate total food being carried
             let mut carrying_food = 0;
             for ant in game_state.my_ants.values() {
-                if let Some((_, amount)) = ant.food {
-                    carrying_food += amount;
-                }
+                carrying_food += ant.food.amount;
             }
 
             text.0 = format!(

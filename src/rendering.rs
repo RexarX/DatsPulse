@@ -98,7 +98,7 @@ pub fn setup_3d_scene(
         materials.add(Color::srgb(0.5, 0.5, 0.5)), // Gray
     );
     tile_materials.insert(
-        TileType::AntSpot,
+        TileType::Anthill,
         materials.add(Color::srgb(0.3, 0.3, 0.8)), // Blue
     );
 
@@ -295,7 +295,7 @@ pub fn debug_rendering_system(
     for ant in game_state.my_ants.values() {
         if ant.ant_type == AntType::Scout {
             let center = ant.position.to_vec3() + Vec3::Y * 0.1;
-            let radius = ant.ant_type.view_radius() as f32 * 0.866; // Approximate hex radius
+            let radius = ant.ant_type.view_range() as f32 * 0.866; // Approximate hex radius
             gizmos.circle(center, radius, Color::srgb(0.0, 1.0, 0.0));
         }
     }
