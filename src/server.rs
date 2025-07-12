@@ -204,6 +204,49 @@ impl ServerClient {
     }
 }
 
+pub fn handle_game_move_commands(
+    mut commands: Commands,
+    mut move_command_events: EventReader<MoveCommandEvent>,
+    server_client: Res<ServerClient>,
+    tokio_tasks: Res<TokioTasksRuntime>,
+) {
+    if move_command_events.is_empty() {
+        return;
+    }
+
+    let mut api_commands = Vec::new();
+
+    for event in move_command_events.read() {
+        // Convert HexCoord path to ApiHex path
+        let api_path: Vec<ApiHex> = event.path.iter().map(|coord| (*coord).into()).collect();
+
+        // Create API move command
+        api_commands.push(ApiMoveCommand {
+            ant: event.ant_id.clone(),
+            path: api_path,
+        });
+    }
+
+    if !api_commands.is_empty() {
+        // Clone the server client for the async task
+        let client = ServerClient {
+            client: server_client.client.clone(),
+            config: server_client.config.clone(),
+            registered: server_client.registered,
+            registration_data: server_client.registration_data.clone(),
+        };
+
+        let move_request = ApiMoveRequest {
+            moves: api_commands.clone(),
+        };
+        info!(target: "server", "Sending {} move commands directly to server", api_commands.len());
+
+        spawn_server_task(&mut commands, &tokio_tasks, move |_ctx| async move {
+            client.send_moves(&move_request).await
+        });
+    }
+}
+
 #[derive(Component)]
 pub struct ServerTask<T> {
     pub handle: Option<JoinHandle<T>>,

@@ -110,9 +110,14 @@ impl Strategy for ExploreStrategy {
     }
 
     fn individual_priority_modifier(&self, ant: &Ant, game_state: &GameState) -> f32 {
-        // Check if this ant is at the edge of explored territory
-        let is_at_frontier = self.is_at_exploration_frontier(ant, game_state);
-        let frontier_bonus = if is_at_frontier { 4.0 } else { 0.0 };
+        // Simplified priority modifier that just checks if there are unexplored neighbors
+        let has_unexplored_neighbors = ant
+            .position
+            .neighbors()
+            .iter()
+            .any(|pos| !game_state.visible_tiles.contains_key(pos));
+
+        let frontier_bonus = if has_unexplored_neighbors { 4.0 } else { 0.0 };
 
         // Check if the ant is already moving (continuity bonus)
         let movement_bonus = if !ant.current_move.is_empty() {
@@ -125,22 +130,65 @@ impl Strategy for ExploreStrategy {
     }
 
     fn execute(&self, ant: &Ant, game_state: &GameState) -> Vec<HexCoord> {
-        // Find an unexplored area to move toward
-        match self.find_exploration_target(ant, game_state) {
-            Some(target) => {
-                // Use the PathFinder to find a path to the target
-                match PathFinder::find_path(
-                    ant.position,
-                    target,
-                    &game_state.visible_tiles,
-                    ant.ant_type.speed() * 2, // Maximum path length based on ant speed
-                ) {
-                    Some(path) => path,
-                    None => self.find_simple_exploration_move(ant, game_state),
+        // Get all passable neighboring tiles
+        let passable_neighbors: Vec<HexCoord> = ant
+            .position
+            .neighbors()
+            .into_iter()
+            .filter(|pos| {
+                match game_state.visible_tiles.get(pos) {
+                    Some(tile) => tile.tile_type.is_passable(),
+                    None => true, // Assume unexplored tiles are passable
                 }
-            }
-            None => self.find_simple_exploration_move(ant, game_state),
+            })
+            .collect();
+
+        // Log the available directions
+        info!(
+            "Simple Explore: Ant {} at {:?} has {} passable neighbors",
+            &ant.id[0..8],
+            ant.position,
+            passable_neighbors.len()
+        );
+
+        if passable_neighbors.is_empty() {
+            info!(
+                "Simple Explore: Ant {} has no passable neighbors, staying put",
+                &ant.id[0..8]
+            );
+            return Vec::new(); // No valid moves
         }
+
+        // Try to avoid going back to the previous position
+        let mut valid_moves: Vec<HexCoord>;
+        if !ant.last_move.is_empty() {
+            let previous_pos = ant.last_move[0];
+            valid_moves = passable_neighbors
+                .iter()
+                .filter(|pos| **pos != previous_pos)
+                .cloned() // Use cloned() to avoid ownership issues
+                .collect();
+
+            // If filtering out the previous position leaves us with no options, use all passable neighbors
+            if valid_moves.is_empty() {
+                valid_moves = passable_neighbors.clone(); // Clone to avoid ownership issues
+            }
+        } else {
+            valid_moves = passable_neighbors.clone(); // Clone to avoid ownership issues
+        }
+
+        // Pick a direction based on the ant's ID for deterministic but seemingly random behavior
+        let index = (ant.id.chars().next().unwrap_or('a') as usize) % valid_moves.len();
+        let chosen_move = valid_moves[index];
+
+        info!(
+            "Simple Explore: Ant {} moving from {:?} to {:?}",
+            &ant.id[0..8],
+            ant.position,
+            chosen_move
+        );
+
+        vec![chosen_move]
     }
 }
 
@@ -263,110 +311,5 @@ impl Strategy for AttackStrategy {
     fn execute(&self, _ant: &Ant, _game_state: &GameState) -> Vec<HexCoord> {
         // Implementation for attacking
         Vec::new()
-    }
-}
-
-//helper methods
-
-// Helper methods for ExploreStrategy
-impl ExploreStrategy {
-    // Check if an ant is at the frontier of explored territory
-    fn is_at_exploration_frontier(&self, ant: &Ant, game_state: &GameState) -> bool {
-        // An ant is at the frontier if at least one of its neighbors is unexplored
-        ant.position
-            .neighbors()
-            .iter()
-            .any(|pos| !game_state.visible_tiles.contains_key(pos))
-    }
-
-    // Find a good target for exploration
-    fn find_exploration_target(&self, ant: &Ant, game_state: &GameState) -> Option<HexCoord> {
-        // Start with immediate neighbors
-        for neighbor in ant.position.neighbors() {
-            if !game_state.visible_tiles.contains_key(&neighbor) {
-                // If we find an unexplored neighbor, that's our target
-                return Some(neighbor);
-            }
-        }
-
-        // If no immediate unexplored neighbors, look for frontier tiles
-        // (tiles that have unexplored neighbors)
-        let search_radius = 10;
-
-        // Find all frontier tiles within search radius
-        let frontier_tiles: Vec<HexCoord> = game_state
-            .visible_tiles
-            .iter()
-            .filter(|(pos, _)| ant.position.distance_to(pos) <= search_radius)
-            .filter(|(pos, _)| {
-                pos.neighbors()
-                    .iter()
-                    .any(|n| !game_state.visible_tiles.contains_key(n))
-            })
-            .map(|(pos, _)| *pos)
-            .collect();
-
-        // If we found frontier tiles, pick the closest one
-        if !frontier_tiles.is_empty() {
-            frontier_tiles
-                .into_iter()
-                .min_by_key(|pos| ant.position.distance_to(pos))
-        } else {
-            None
-        }
-    }
-
-    // Find a simple move for exploration if pathfinding fails
-    fn find_simple_exploration_move(&self, ant: &Ant, game_state: &GameState) -> Vec<HexCoord> {
-        // Get all neighbors that are passable
-        let passable_neighbors: Vec<HexCoord> = ant
-            .position
-            .neighbors()
-            .into_iter()
-            .filter(|pos| {
-                match game_state.visible_tiles.get(pos) {
-                    Some(tile) => tile.tile_type.is_passable(), // Check if tile is passable
-                    None => true, // Unexplored tiles are assumed passable
-                }
-            })
-            .collect();
-
-        // Rest of the function remains the same
-        if passable_neighbors.is_empty() {
-            return Vec::new(); // No valid moves
-        }
-
-        // Prefer unexplored neighbors
-        let unexplored: Vec<HexCoord> = passable_neighbors
-            .iter()
-            .filter(|pos| !game_state.visible_tiles.contains_key(pos))
-            .copied()
-            .collect();
-
-        if !unexplored.is_empty() {
-            // Pick a deterministic but seemingly random direction
-            let index = (ant.id.chars().next().unwrap_or('a') as usize) % unexplored.len();
-            return vec![unexplored[index]];
-        }
-
-        // If no unexplored neighbors, avoid where we came from
-        if !ant.last_move.is_empty() {
-            let previous_pos = ant.last_move[0];
-            // Create a copy of passable_neighbors to avoid moving it
-            let valid_moves: Vec<HexCoord> = passable_neighbors
-                .iter()
-                .filter(|pos| **pos != previous_pos)
-                .copied()
-                .collect();
-
-            if !valid_moves.is_empty() {
-                let index = (ant.id.chars().next().unwrap_or('a') as usize) % valid_moves.len();
-                return vec![valid_moves[index]];
-            }
-        }
-
-        // Fallback: just pick any passable neighbor
-        let index = (ant.id.chars().next().unwrap_or('a') as usize) % passable_neighbors.len();
-        vec![passable_neighbors[index]]
     }
 }

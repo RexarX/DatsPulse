@@ -112,9 +112,9 @@ pub struct ApiAnt {
     pub r: i32,
     pub health: i32,
     pub food: ApiFood,
-    #[serde(rename = "lastMove")]
+    #[serde(rename = "lastMove", default)]
     pub last_move: Vec<ApiHex>,
-    #[serde(rename = "move")]
+    #[serde(rename = "move", default)]
     pub current_move: Vec<ApiHex>,
     #[serde(rename = "lastAttack")]
     pub last_attack: Option<ApiHex>,

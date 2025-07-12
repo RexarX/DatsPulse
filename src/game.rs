@@ -56,6 +56,8 @@ pub fn game_logic_system(
         return;
     }
 
+    info!("Turn #{}: Strategy assignments:", game_state.turn_number);
+
     // Process all ants and decide strategies
     for (ant_id, ant) in &game_state.my_ants {
         // First, get the strategy name and path without keeping a reference
@@ -72,6 +74,11 @@ pub fn game_logic_system(
 
         // Now we can mutably borrow strategy_manager
         strategy_manager.set_ant_strategy(ant_id, &strategy_name);
+
+        info!(
+            "  Ant {} (Type: {:?}, Pos: {:?}): {} strategy",
+            ant_id, ant.ant_type, ant.position, strategy_name
+        );
 
         // If the path is not empty, send a move command
         if !path.is_empty() {

@@ -21,6 +21,7 @@ impl Plugin for ServerPlugin {
                     server_tick_system,
                     handle_registration_tasks,
                     handle_arena_state_tasks,
+                    handle_game_move_commands,
                     handle_move_commands,
                     handle_move_response_tasks,
                     handle_logs_requests,
