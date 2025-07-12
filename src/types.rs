@@ -744,26 +744,12 @@ pub enum GameError {
 
 pub type GameResult<T> = Result<T, GameError>;
 
-// Utility functions
 pub fn hex_to_world_pos(hex: &HexCoord) -> Vec3 {
-    // Convert hex coordinates to world position for 3D rendering
-    let size = 1.0;
-    let x = size * (3.0_f32.sqrt() * hex.q as f32 + 3.0_f32.sqrt() / 2.0 * hex.r as f32);
-    let z = size * (3.0 / 2.0 * hex.r as f32);
-    Vec3::new(x, 0.0, z)
+    crate::hex_utils::HexGeometry::hex_to_world(hex)
 }
 
 pub fn world_pos_to_hex(pos: &Vec3) -> HexCoord {
-    // Convert world position back to hex coordinates
-    let size = 1.0;
-    let q = (3.0_f32.sqrt() / 3.0 * pos.x - 1.0 / 3.0 * pos.z) / size;
-    let r = (2.0 / 3.0 * pos.z) / size;
-
-    // Round to nearest hex
-    let q_round = q.round() as i32;
-    let r_round = r.round() as i32;
-
-    HexCoord::new(q_round, r_round)
+    crate::hex_utils::HexGeometry::world_to_hex(pos)
 }
 
 // Constants

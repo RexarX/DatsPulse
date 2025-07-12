@@ -1,13 +1,10 @@
 use bevy::{
     core_pipeline::{
-        experimental::taa::{TemporalAntiAliasPlugin, TemporalAntiAliasing},
+        experimental::taa::TemporalAntiAliasing,
         prepass::{DepthPrepass, MotionVectorPrepass},
-        smaa::{Smaa, SmaaPlugin, SmaaPreset},
+        smaa::{Smaa, SmaaPreset},
     },
-    pbr::{
-        ScreenSpaceAmbientOcclusion, ScreenSpaceAmbientOcclusionPlugin,
-        ScreenSpaceAmbientOcclusionQualityLevel,
-    },
+    pbr::{ScreenSpaceAmbientOcclusion, ScreenSpaceAmbientOcclusionQualityLevel},
     prelude::*,
     render::camera::{MipBias, TemporalJitter},
     window::PresentMode,
@@ -21,6 +18,7 @@ pub struct RendererSettings {
     pub current_ssao: bool,
     pub target_fps: u32,
     pub anisotropic_filtering: u32,
+    pub wireframe_enabled: bool,
     pub settings_changed: bool,
 }
 
@@ -56,6 +54,7 @@ impl Default for RendererSettings {
             current_ssao: false,
             target_fps: 60,
             anisotropic_filtering: 16,
+            wireframe_enabled: false,
             settings_changed: false,
         }
     }
@@ -67,24 +66,26 @@ pub fn setup_renderer(mut commands: Commands, app_config: Res<AppConfig>) {
         current_ssao: app_config.renderer.ssao_enabled,
         target_fps: app_config.renderer.target_fps,
         anisotropic_filtering: app_config.renderer.anisotropic_filtering,
+        wireframe_enabled: app_config.renderer.wireframe_enabled,
         settings_changed: false,
     };
 
     commands.insert_resource(renderer_settings.clone());
 
     info!(
-        "Renderer settings initialized: AA={:?}, SSAO={}, FPS={}, AF={}x",
+        "Renderer settings initialized: AA={:?}, SSAO={}, FPS={}, AF={}x, Wireframe={}",
         renderer_settings.current_aa,
         renderer_settings.current_ssao,
         renderer_settings.target_fps,
-        renderer_settings.anisotropic_filtering
+        renderer_settings.anisotropic_filtering,
+        renderer_settings.wireframe_enabled
     );
 }
 
 pub fn apply_anti_aliasing(
     mut commands: Commands,
     camera_query: Query<Entity, With<GameCamera>>,
-    mut renderer_settings: ResMut<RendererSettings>,
+    renderer_settings: Res<RendererSettings>,
 ) {
     if !renderer_settings.settings_changed {
         return;
@@ -141,7 +142,7 @@ pub fn apply_anti_aliasing(
 pub fn apply_ssao(
     mut commands: Commands,
     camera_query: Query<Entity, With<GameCamera>>,
-    mut renderer_settings: ResMut<RendererSettings>,
+    renderer_settings: Res<RendererSettings>,
 ) {
     if !renderer_settings.settings_changed {
         return;
@@ -188,7 +189,7 @@ pub fn apply_framerate_limit(renderer_settings: Res<RendererSettings>, time: Res
 pub fn apply_window_settings(
     mut windows: Query<&mut Window>,
     app_config: Res<AppConfig>,
-    mut renderer_settings: ResMut<RendererSettings>,
+    renderer_settings: Res<RendererSettings>,
 ) {
     if !renderer_settings.settings_changed {
         return;
@@ -233,7 +234,7 @@ pub fn apply_window_settings(
 pub fn apply_clear_color(
     mut clear_color: ResMut<ClearColor>,
     app_config: Res<AppConfig>,
-    mut renderer_settings: ResMut<RendererSettings>,
+    renderer_settings: Res<RendererSettings>,
 ) {
     if renderer_settings.settings_changed {
         clear_color.0 = Color::srgb(

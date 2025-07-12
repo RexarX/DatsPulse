@@ -30,11 +30,7 @@ impl Default for SkyboxManager {
     }
 }
 
-pub fn setup_skybox(
-    mut commands: Commands,
-    asset_server: Res<AssetServer>,
-    mut skybox_manager: ResMut<SkyboxManager>,
-) {
+pub fn setup_skybox(asset_server: Res<AssetServer>, mut skybox_manager: ResMut<SkyboxManager>) {
     // Try to load the vertical strip cubemap
     let cubemap_handle = asset_server.load("textures/skybox/cubemap_strip.png");
     skybox_manager.skybox_handle = Some(cubemap_handle);
@@ -82,7 +78,10 @@ pub fn update_skybox(
                             ..default()
                         });
                     } else {
-                        error!("Skybox image dimensions incorrect. Expected height = 6 * width, got {}x{}", width, height);
+                        error!(
+                            "Skybox image dimensions incorrect. Expected height = 6 * width, got {}x{}",
+                            width, height
+                        );
                         apply_fallback_skybox(
                             &mut skybox_manager,
                             &mut camera_query,

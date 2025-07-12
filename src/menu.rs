@@ -3,8 +3,9 @@ use crate::input::CameraController;
 use crate::renderer::RendererSettings;
 use crate::types::*;
 use bevy::diagnostic::{DiagnosticsStore, FrameTimeDiagnosticsPlugin};
+use bevy::pbr::wireframe::WireframeConfig;
 use bevy::prelude::*;
-use bevy::window::{CursorGrabMode, MonitorSelection, PresentMode, WindowMode, WindowResolution};
+use bevy::window::{MonitorSelection, PresentMode, WindowMode, WindowResolution};
 use bevy_egui::{EguiContexts, egui};
 
 #[derive(Resource)]
@@ -95,28 +96,22 @@ impl Default for ResolutionOptions {
     }
 }
 
-pub fn setup_menu(mut commands: Commands) {
-    commands.insert_resource(MenuState::default());
+pub fn setup_menu(mut commands: Commands, app_config: Res<AppConfig>) {
+    let mut menu_state = MenuState::default();
+
+    // Initialize FOV from camera or use default
+    menu_state.fov = 75.0; // Default FOV in degrees
+
+    commands.insert_resource(menu_state);
     commands.insert_resource(ResolutionOptions::default());
 }
 
 pub fn menu_toggle_system(
     keyboard_input: Res<ButtonInput<KeyCode>>,
     mut menu_state: ResMut<MenuState>,
-    mut mouse_control: ResMut<crate::input::CameraMouseControl>,
-    mut windows: Query<&mut Window>,
 ) {
     if keyboard_input.just_pressed(KeyCode::Insert) {
         menu_state.show_menu = !menu_state.show_menu;
-
-        // When menu opens, disable mouse control and show cursor
-        if menu_state.show_menu {
-            mouse_control.enabled = false;
-            if let Ok(mut window) = windows.single_mut() {
-                window.cursor_options.visible = true;
-                window.cursor_options.grab_mode = CursorGrabMode::None;
-            }
-        }
     }
 }
 
@@ -124,14 +119,15 @@ pub fn menu_ui_system(
     mut contexts: EguiContexts,
     mut menu_state: ResMut<MenuState>,
     mut camera_controller: ResMut<CameraController>,
-    mut camera_query: Query<&mut Projection, With<GameCamera>>,
+    mut camera_transform_query: Query<&mut Transform, With<GameCamera>>,
+    mut projection_query: Query<&mut Projection, With<GameCamera>>,
     mut windows: Query<&mut Window>,
     resolution_options: Res<ResolutionOptions>,
     mut reconnect_events: EventWriter<ReconnectRequestEvent>,
     mut app_config: ResMut<crate::config::AppConfig>,
     mut renderer_settings: ResMut<RendererSettings>,
     mut clear_color: ResMut<ClearColor>,
-    // Add these for debug info
+    mut wireframe_config: ResMut<WireframeConfig>,
     game_state: Res<GameState>,
     connection_state: Res<ConnectionState>,
     diagnostics: Res<DiagnosticsStore>,
@@ -547,7 +543,74 @@ pub fn menu_ui_system(
                         &app_config,
                         &mut renderer_settings,
                         &mut clear_color,
+                        &mut wireframe_config,
                     );
+                }
+
+                ui.label("Wireframe:");
+                if ui
+                    .checkbox(
+                        &mut app_config.renderer.wireframe_enabled,
+                        "Enable Wireframe",
+                    )
+                    .changed()
+                {
+                    wireframe_config.global = app_config.renderer.wireframe_enabled;
+                }
+
+                if app_config.renderer.wireframe_enabled {
+                    ui.label("Wireframe Color:");
+                    ui.horizontal(|ui| {
+                        ui.label("R:");
+                        if ui
+                            .add(egui::Slider::new(
+                                &mut app_config.renderer.wireframe_color.0,
+                                0.0..=1.0,
+                            ))
+                            .changed()
+                        {
+                            wireframe_config.default_color = Color::srgb(
+                                app_config.renderer.wireframe_color.0,
+                                app_config.renderer.wireframe_color.1,
+                                app_config.renderer.wireframe_color.2,
+                            )
+                            .into();
+                        }
+                    });
+                    ui.horizontal(|ui| {
+                        ui.label("G:");
+                        if ui
+                            .add(egui::Slider::new(
+                                &mut app_config.renderer.wireframe_color.1,
+                                0.0..=1.0,
+                            ))
+                            .changed()
+                        {
+                            wireframe_config.default_color = Color::srgb(
+                                app_config.renderer.wireframe_color.0,
+                                app_config.renderer.wireframe_color.1,
+                                app_config.renderer.wireframe_color.2,
+                            )
+                            .into();
+                        }
+                    });
+                    ui.horizontal(|ui| {
+                        ui.label("B:");
+                        if ui
+                            .add(egui::Slider::new(
+                                &mut app_config.renderer.wireframe_color.2,
+                                0.0..=1.0,
+                            ))
+                            .changed()
+                        {
+                            wireframe_config.default_color = Color::srgb(
+                                app_config.renderer.wireframe_color.0,
+                                app_config.renderer.wireframe_color.1,
+                                app_config.renderer.wireframe_color.2,
+                            )
+                            .into();
+                        }
+                    });
                 }
             });
 
@@ -560,26 +623,168 @@ pub fn menu_ui_system(
                     .add(egui::Slider::new(&mut menu_state.fov, 45.0..=120.0).suffix("°"))
                     .changed()
                 {
-                    update_camera_fov(&mut camera_query, menu_state.fov);
+                    update_camera_fov(&mut projection_query, menu_state.fov);
+                }
+
+                ui.separator();
+
+                ui.label("Movement Speed:");
+                if ui
+                    .add(
+                        egui::Slider::new(&mut camera_controller.movement_speed, 1.0..=30.0)
+                            .suffix(" units/s"),
+                    )
+                    .changed()
+                {
+                    // Update the app config when changed
+                    app_config.camera.movement_speed = camera_controller.movement_speed;
+                }
+
+                ui.label("Sprint Multiplier:");
+                if ui
+                    .add(
+                        egui::Slider::new(&mut camera_controller.sprint_multiplier, 1.0..=5.0)
+                            .suffix("x"),
+                    )
+                    .changed()
+                {
+                    app_config.camera.sprint_multiplier = camera_controller.sprint_multiplier;
                 }
 
                 ui.label("Mouse Sensitivity:");
-                ui.add(
-                    egui::Slider::new(&mut camera_controller.mouse_sensitivity, 0.001..=0.01)
-                        .step_by(0.001),
-                );
+                if ui
+                    .add(
+                        egui::Slider::new(&mut camera_controller.mouse_sensitivity, 0.001..=2.0)
+                            .step_by(0.001),
+                    )
+                    .changed()
+                {
+                    app_config.camera.mouse_sensitivity = camera_controller.mouse_sensitivity;
+                }
 
-                ui.label("Movement Speed:");
-                ui.add(
-                    egui::Slider::new(&mut camera_controller.movement_speed, 1.0..=20.0)
-                        .suffix(" units/s"),
-                );
+                ui.separator();
 
-                ui.label("Sprint Multiplier:");
-                ui.add(
-                    egui::Slider::new(&mut camera_controller.sprint_multiplier, 1.0..=5.0)
-                        .suffix("x"),
-                );
+                ui.label("Zoom Settings:");
+                ui.label("Zoom Speed:");
+                if ui
+                    .add(
+                        egui::Slider::new(&mut camera_controller.zoom_speed, 10.0..=100.0)
+                            .suffix(" units/s"),
+                    )
+                    .changed()
+                {
+                    app_config.camera.zoom_speed = camera_controller.zoom_speed;
+                }
+
+                ui.label("Min Zoom:");
+                if ui
+                    .add(
+                        egui::Slider::new(&mut camera_controller.min_zoom, 3.0..=20.0)
+                            .suffix(" units"),
+                    )
+                    .changed()
+                {
+                    app_config.camera.min_zoom = camera_controller.min_zoom;
+                    // Clamp current zoom if it's below the new minimum
+                    if camera_controller.current_zoom < camera_controller.min_zoom {
+                        camera_controller.current_zoom = camera_controller.min_zoom;
+                        app_config.camera.current_zoom = camera_controller.current_zoom;
+                    }
+                }
+
+                ui.label("Max Zoom:");
+                if ui
+                    .add(
+                        egui::Slider::new(&mut camera_controller.max_zoom, 20.0..=100.0)
+                            .suffix(" units"),
+                    )
+                    .changed()
+                {
+                    app_config.camera.max_zoom = camera_controller.max_zoom;
+                    // Clamp current zoom if it's above the new maximum
+                    if camera_controller.current_zoom > camera_controller.max_zoom {
+                        camera_controller.current_zoom = camera_controller.max_zoom;
+                        app_config.camera.current_zoom = camera_controller.current_zoom;
+                    }
+                }
+
+                ui.label("Current Zoom:");
+                let min_zoom = camera_controller.min_zoom;
+                let max_zoom = camera_controller.max_zoom;
+                if ui
+                    .add(
+                        egui::Slider::new(&mut camera_controller.current_zoom, min_zoom..=max_zoom)
+                            .suffix(" units"),
+                    )
+                    .changed()
+                {
+                    app_config.camera.current_zoom = camera_controller.current_zoom;
+                    // Apply the zoom change immediately to the camera
+                    if let Ok(mut camera_transform) = camera_transform_query.single_mut() {
+                        let current_pos = camera_transform.translation;
+                        let target_pos =
+                            Vec3::new(current_pos.x, camera_controller.current_zoom, current_pos.z);
+                        camera_transform.translation = target_pos;
+                    }
+                }
+
+                ui.separator();
+
+                ui.label("Mouse Drag Settings:");
+                ui.label("Drag Sensitivity:");
+                if ui
+                    .add(
+                        egui::Slider::new(&mut app_config.camera.drag_sensitivity, 0.001..=0.1)
+                            .step_by(0.001),
+                    )
+                    .changed()
+                {
+                    // Note: This will be applied to MouseDragState in the next frame
+                    // We could add a system to sync this if needed
+                }
+
+                ui.separator();
+
+                // Camera position display (read-only)
+                if let Ok(camera_transform) = camera_transform_query.single() {
+                    ui.label("Current Position:");
+                    ui.label(format!(
+                        "X: {:.1}, Y: {:.1}, Z: {:.1}",
+                        camera_transform.translation.x,
+                        camera_transform.translation.y,
+                        camera_transform.translation.z
+                    ));
+                }
+
+                // Reset camera button
+                if ui.button("Reset Camera to Default").clicked() {
+                    // Reset to default values
+                    camera_controller.movement_speed = 15.0;
+                    camera_controller.sprint_multiplier = 2.0;
+                    camera_controller.mouse_sensitivity = 0.5;
+                    camera_controller.zoom_speed = 50.0;
+                    camera_controller.min_zoom = 5.0;
+                    camera_controller.max_zoom = 50.0;
+                    camera_controller.current_zoom = 20.0;
+
+                    // Update app config
+                    app_config.camera.movement_speed = camera_controller.movement_speed;
+                    app_config.camera.sprint_multiplier = camera_controller.sprint_multiplier;
+                    app_config.camera.mouse_sensitivity = camera_controller.mouse_sensitivity;
+                    app_config.camera.zoom_speed = camera_controller.zoom_speed;
+                    app_config.camera.min_zoom = camera_controller.min_zoom;
+                    app_config.camera.max_zoom = camera_controller.max_zoom;
+                    app_config.camera.current_zoom = camera_controller.current_zoom;
+                    app_config.camera.drag_sensitivity = 0.01;
+
+                    // Apply zoom change to camera
+                    if let Ok(mut camera_transform) = camera_transform_query.single_mut() {
+                        let current_pos = camera_transform.translation;
+                        let target_pos =
+                            Vec3::new(current_pos.x, camera_controller.current_zoom, current_pos.z);
+                        camera_transform.translation = target_pos;
+                    }
+                }
             });
 
             ui.separator();
@@ -680,6 +885,7 @@ fn apply_renderer_settings(
     app_config: &AppConfig,
     renderer_settings: &mut RendererSettings,
     clear_color: &mut ClearColor,
+    wireframe_config: &mut WireframeConfig,
 ) {
     // Update renderer settings
     renderer_settings.current_aa =
@@ -694,6 +900,15 @@ fn apply_renderer_settings(
         app_config.renderer.clear_color.1,
         app_config.renderer.clear_color.2,
     );
+
+    // Update wireframe settings
+    wireframe_config.global = app_config.renderer.wireframe_enabled;
+    wireframe_config.default_color = Color::srgb(
+        app_config.renderer.wireframe_color.0,
+        app_config.renderer.wireframe_color.1,
+        app_config.renderer.wireframe_color.2,
+    )
+    .into();
 
     // Update window settings
     if let Ok(mut window) = windows.single_mut() {
@@ -826,5 +1041,16 @@ pub fn framerate_limiter_system(menu_state: Res<MenuState>, time: Res<Time>) {
     if frame_time < target_frame_time {
         let sleep_time = target_frame_time - frame_time;
         thread::sleep(sleep_time);
+    }
+}
+
+pub fn sync_fov_from_camera(
+    mut menu_state: ResMut<MenuState>,
+    camera_query: Query<&Projection, (With<GameCamera>, Changed<Projection>)>,
+) {
+    if let Ok(projection) = camera_query.single() {
+        if let Projection::Perspective(perspective) = projection {
+            menu_state.fov = perspective.fov.to_degrees();
+        }
     }
 }

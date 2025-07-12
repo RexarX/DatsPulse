@@ -707,7 +707,6 @@ fn find_closest_food(food_list: &[ApiFoodOnMap], position: &HexCoord) -> Option<
 pub fn monitor_connection_system(
     server_client: Res<ServerClient>,
     mut connection_state: ResMut<ConnectionState>,
-    time: Res<Time>,
 ) {
     // Update connection state based on registration status
     if server_client.registered != connection_state.connected {

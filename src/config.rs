@@ -26,7 +26,11 @@ pub struct CameraConfig {
     pub movement_speed: f32,
     pub sprint_multiplier: f32,
     pub mouse_sensitivity: f32,
-    pub fov: f32,
+    pub zoom_speed: f32,
+    pub min_zoom: f32,
+    pub max_zoom: f32,
+    pub current_zoom: f32,
+    pub drag_sensitivity: f32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -56,6 +60,8 @@ pub struct RendererConfig {
     pub anisotropic_filtering: u32, // 1, 2, 4, 8, 16
     pub anti_aliasing: String,      // "none", "msaa2", "msaa4", "msaa8", "fxaa", "smaa", "taa"
     pub ssao_enabled: bool,
+    pub wireframe_enabled: bool,
+    pub wireframe_color: (f32, f32, f32),
     pub clear_color: (f32, f32, f32),
 }
 
@@ -77,13 +83,19 @@ impl Default for AppConfig {
                 anisotropic_filtering: 16,
                 anti_aliasing: "msaa4".to_string(),
                 ssao_enabled: false,
-                clear_color: (0.0, 0.0, 0.0), // Black background
+                wireframe_enabled: false,
+                wireframe_color: (1.0, 1.0, 1.0),
+                clear_color: (0.0, 0.0, 0.0),
             },
             camera: CameraConfig {
-                movement_speed: 5.0,
+                movement_speed: 15.0,
                 sprint_multiplier: 2.0,
-                mouse_sensitivity: 0.002,
-                fov: 75.0,
+                mouse_sensitivity: 0.5,
+                zoom_speed: 50.0,
+                min_zoom: 5.0,
+                max_zoom: 50.0,
+                current_zoom: 20.0,
+                drag_sensitivity: 0.01,
             },
             ui: UiConfig {
                 show_fps: false,

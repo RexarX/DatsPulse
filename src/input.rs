@@ -1,6 +1,7 @@
+use crate::AppConfig;
 use crate::menu::MenuState;
 use crate::types::*;
-use bevy::input::mouse::MouseMotion;
+use bevy::input::mouse::{MouseMotion, MouseWheel};
 use bevy::prelude::*;
 use bevy::window::CursorGrabMode;
 
@@ -9,16 +10,39 @@ pub struct CameraController {
     pub movement_speed: f32,
     pub sprint_multiplier: f32,
     pub mouse_sensitivity: f32,
-    pub pitch: f32,
+    pub zoom_speed: f32,
+    pub min_zoom: f32,
+    pub max_zoom: f32,
+    pub current_zoom: f32,
 }
 
 impl Default for CameraController {
     fn default() -> Self {
         Self {
-            movement_speed: 8.0, // Faster for hex world
+            movement_speed: 15.0,
             sprint_multiplier: 2.0,
-            mouse_sensitivity: 0.003,
-            pitch: 0.0,
+            mouse_sensitivity: 0.5,
+            zoom_speed: 50.0,
+            min_zoom: 5.0,
+            max_zoom: 50.0,
+            current_zoom: 20.0,
+        }
+    }
+}
+
+#[derive(Resource)]
+pub struct MouseDragState {
+    pub is_dragging: bool,
+    pub last_mouse_pos: Vec2,
+    pub drag_sensitivity: f32,
+}
+
+impl Default for MouseDragState {
+    fn default() -> Self {
+        Self {
+            is_dragging: false,
+            last_mouse_pos: Vec2::ZERO,
+            drag_sensitivity: 0.01,
         }
     }
 }
@@ -28,21 +52,41 @@ pub struct CameraMouseControl {
     pub enabled: bool,
 }
 
-pub fn setup_input(mut commands: Commands) {
-    commands.insert_resource(CameraController::default());
+pub fn setup_input(mut commands: Commands, app_config: Res<AppConfig>) {
+    let controller = CameraController {
+        movement_speed: app_config.camera.movement_speed,
+        sprint_multiplier: app_config.camera.sprint_multiplier,
+        mouse_sensitivity: app_config.camera.mouse_sensitivity,
+        zoom_speed: app_config.camera.zoom_speed,
+        min_zoom: app_config.camera.min_zoom,
+        max_zoom: app_config.camera.max_zoom,
+        current_zoom: app_config.camera.current_zoom,
+    };
+
+    let drag_state = MouseDragState {
+        is_dragging: false,
+        last_mouse_pos: Vec2::ZERO,
+        drag_sensitivity: app_config.camera.drag_sensitivity,
+    };
+
+    commands.insert_resource(controller);
+    commands.insert_resource(drag_state);
     commands.insert_resource(CameraMouseControl::default());
 }
 
 pub fn camera_movement_system(
     keyboard_input: Res<ButtonInput<KeyCode>>,
+    mouse_button_input: Res<ButtonInput<MouseButton>>,
+    mut mouse_motion_events: EventReader<MouseMotion>,
+    mut scroll_events: EventReader<MouseWheel>,
     mut camera_query: Query<&mut Transform, With<GameCamera>>,
-    controller: Res<CameraController>,
+    mut controller: ResMut<CameraController>,
+    mut drag_state: ResMut<MouseDragState>,
     time: Res<Time>,
     menu_state: Res<MenuState>,
-    mouse_control: Res<CameraMouseControl>,
+    windows: Query<&Window>,
 ) {
-    // Don't process camera movement if menu is open or mouse control is disabled
-    if menu_state.show_menu || !mouse_control.enabled {
+    if menu_state.show_menu {
         return;
     }
 
@@ -54,31 +98,63 @@ pub fn camera_movement_system(
             controller.movement_speed
         };
 
-        // Forward/Backward (W = forward, S = backward)
+        // WASD movement
         if keyboard_input.pressed(KeyCode::KeyW) {
-            movement += camera_transform.forward() * speed * time.delta_secs();
+            movement.x -= speed * time.delta_secs();
         }
         if keyboard_input.pressed(KeyCode::KeyS) {
-            movement -= camera_transform.forward() * speed * time.delta_secs();
+            movement.x += speed * time.delta_secs();
         }
-
-        // Left/Right
         if keyboard_input.pressed(KeyCode::KeyA) {
-            movement -= camera_transform.right() * speed * time.delta_secs();
+            movement.z += speed * time.delta_secs();
         }
         if keyboard_input.pressed(KeyCode::KeyD) {
-            movement += camera_transform.right() * speed * time.delta_secs();
+            movement.z -= speed * time.delta_secs();
         }
 
-        // Up/Down
-        if keyboard_input.pressed(KeyCode::Space) {
-            movement += Vec3::Y * speed * time.delta_secs();
-        }
-        if keyboard_input.pressed(KeyCode::ControlLeft) {
-            movement -= Vec3::Y * speed * time.delta_secs();
+        // Mouse drag movement
+        if mouse_button_input.pressed(MouseButton::Right) {
+            if !drag_state.is_dragging {
+                drag_state.is_dragging = true;
+                if let Ok(window) = windows.single() {
+                    if let Some(cursor_pos) = window.cursor_position() {
+                        drag_state.last_mouse_pos = cursor_pos;
+                    }
+                }
+            } else {
+                for event in mouse_motion_events.read() {
+                    // Make drag speed independent of zoom by using a fixed base sensitivity
+                    let base_drag_sensitivity = 0.02;
+                    let drag_delta = event.delta * base_drag_sensitivity;
+                    movement.x -= drag_delta.y;
+                    movement.z += drag_delta.x;
+                }
+            }
+        } else {
+            drag_state.is_dragging = false;
         }
 
+        // Mouse wheel zoom
+        for event in scroll_events.read() {
+            let zoom_delta = event.y * controller.zoom_speed * time.delta_secs();
+            controller.current_zoom = (controller.current_zoom - zoom_delta)
+                .clamp(controller.min_zoom, controller.max_zoom);
+
+            let current_pos = camera_transform.translation;
+            let target_pos = Vec3::new(current_pos.x, controller.current_zoom, current_pos.z);
+            camera_transform.translation = target_pos;
+        }
+
+        // Apply movement
         camera_transform.translation += movement;
+
+        // Ensure camera always looks down at an angle
+        let look_at_target = Vec3::new(
+            camera_transform.translation.x,
+            0.0,
+            camera_transform.translation.z,
+        );
+        camera_transform.look_at(look_at_target, Vec3::Y);
     }
 }
 
@@ -107,43 +183,23 @@ pub fn camera_mouse_toggle_system(
     }
 }
 
-pub fn camera_mouse_look_system(
-    mut mouse_motion_events: EventReader<MouseMotion>,
-    mut camera_query: Query<&mut Transform, With<GameCamera>>,
+pub fn sync_camera_settings(
+    app_config: Res<AppConfig>,
+    mut drag_state: ResMut<MouseDragState>,
     mut controller: ResMut<CameraController>,
-    mouse_control: Res<CameraMouseControl>,
-    menu_state: Res<MenuState>,
 ) {
-    // Don't process mouse look if menu is open or mouse control is disabled
-    if !mouse_control.enabled || menu_state.show_menu {
-        return;
-    }
+    // Only sync if config has changed
+    if app_config.is_changed() {
+        drag_state.drag_sensitivity = app_config.camera.drag_sensitivity;
 
-    let mut delta = Vec2::ZERO;
-    for event in mouse_motion_events.read() {
-        delta += event.delta;
-    }
-    if delta == Vec2::ZERO {
-        return;
-    }
-
-    if let Ok(mut transform) = camera_query.single_mut() {
-        // Yaw (around global Y)
-        let yaw = -delta.x * controller.mouse_sensitivity;
-        // Pitch (around local X)
-        let pitch_delta = -delta.y * controller.mouse_sensitivity;
-
-        // Update and clamp pitch
-        controller.pitch = (controller.pitch + pitch_delta)
-            .clamp(-std::f32::consts::FRAC_PI_2, std::f32::consts::FRAC_PI_2);
-
-        // Apply yaw
-        transform.rotate_y(yaw);
-
-        // Set pitch by constructing a new rotation
-        let yaw_rotation = Quat::from_rotation_y(transform.rotation.to_euler(EulerRot::YXZ).0);
-        let pitch_rotation = Quat::from_rotation_x(controller.pitch);
-        transform.rotation = yaw_rotation * pitch_rotation;
+        // Sync other settings that might have been changed externally
+        controller.movement_speed = app_config.camera.movement_speed;
+        controller.sprint_multiplier = app_config.camera.sprint_multiplier;
+        controller.mouse_sensitivity = app_config.camera.mouse_sensitivity;
+        controller.zoom_speed = app_config.camera.zoom_speed;
+        controller.min_zoom = app_config.camera.min_zoom;
+        controller.max_zoom = app_config.camera.max_zoom;
+        controller.current_zoom = app_config.camera.current_zoom;
     }
 }
 

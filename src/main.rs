@@ -1,10 +1,11 @@
 mod config;
 mod culling;
 mod game;
+mod hex_utils;
 mod input;
 mod menu;
 mod plugins;
-mod renderer; // Add this line
+mod renderer;
 mod rendering;
 mod server;
 mod skybox;
@@ -13,6 +14,12 @@ mod types;
 mod ui;
 mod utils;
 
+use bevy::pbr::wireframe::{WireframeConfig, WireframePlugin};
+use bevy::render::{
+    RenderPlugin,
+    render_resource::WgpuFeatures,
+    settings::{RenderCreation, WgpuSettings},
+};
 use bevy::{
     core_pipeline::experimental::taa::TemporalAntiAliasPlugin,
     diagnostic::FrameTimeDiagnosticsPlugin, prelude::*,
@@ -127,6 +134,13 @@ fn main() -> anyhow::Result<()> {
         // Core Bevy plugins
         .add_plugins(
             DefaultPlugins
+                .set(RenderPlugin {
+                    render_creation: RenderCreation::Automatic(WgpuSettings {
+                        features: WgpuFeatures::POLYGON_MODE_LINE,
+                        ..default()
+                    }),
+                    ..default()
+                })
                 .set(WindowPlugin {
                     primary_window: Some(Window {
                         title: "DatsPulse - Ant Colony Strategy".to_string(),
@@ -158,6 +172,7 @@ fn main() -> anyhow::Result<()> {
             GamePlugin,
             InputPlugin,
             TemporalAntiAliasPlugin,
+            WireframePlugin::default(),
             MenuPlugin,
             UiPlugin,
             RenderingPlugin,
@@ -166,6 +181,15 @@ fn main() -> anyhow::Result<()> {
             RendererPlugin,
         ))
         // Resources
+        .insert_resource(WireframeConfig {
+            global: app_config.renderer.wireframe_enabled,
+            default_color: Color::srgb(
+                app_config.renderer.wireframe_color.0,
+                app_config.renderer.wireframe_color.1,
+                app_config.renderer.wireframe_color.2,
+            )
+            .into(),
+        })
         .insert_resource(clear_color)
         .insert_resource(app_config)
         .insert_resource(server_config)

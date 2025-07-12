@@ -15,6 +15,7 @@ impl Plugin for MenuPlugin {
                     menu_toggle_system,
                     update_ui_visibility,
                     framerate_limiter_system,
+                    sync_fov_from_camera,
                 ),
             )
             .add_systems(EguiPrimaryContextPass, menu_ui_system);

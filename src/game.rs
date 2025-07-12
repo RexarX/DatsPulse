@@ -80,22 +80,12 @@ pub fn game_logic_system(
             ant_id, game_state.my_ants[*ant_id].ant_type, strategy_name, path
         );
 
-        if let Some(next_pos) = path.first() {
-            // Don't allow two ants to move to the same tile, or to a tile already occupied by another ant
-            let occupied = reserved.contains(next_pos)
-                || game_state
-                    .my_ants
-                    .values()
-                    .any(|ant| ant.position == *next_pos);
-
-            if !occupied && !path.is_empty() {
-                reserved.insert(*next_pos);
-                move_events.send(MoveCommandEvent {
-                    ant_id: (*ant_id).clone(),
-                    path: path.clone(),
-                });
-            }
-            // else: skip this move (ant will wait)
+        // If the path is not empty, send a move command
+        if !path.is_empty() {
+            move_events.write(MoveCommandEvent {
+                ant_id: ant_id.clone(),
+                path,
+            });
         }
     }
 

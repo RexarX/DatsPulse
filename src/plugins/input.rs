@@ -12,9 +12,9 @@ impl Plugin for InputPlugin {
                 Update,
                 (
                     camera_mouse_toggle_system,
-                    camera_mouse_look_system,
                     camera_movement_system,
                     input_system,
+                    sync_camera_settings,
                 ),
             );
     }
