@@ -1,5 +1,5 @@
 use crate::types::*;
-use crate::utils::PathFinder;
+use crate::utils::*;
 use bevy::prelude::*;
 use std::collections::HashMap;
 
@@ -82,7 +82,7 @@ pub struct GatherStrategy;
 pub struct DefendStrategy;
 pub struct AttackStrategy;
 
-// Implementation for explore strategy
+// Updated ExploreStrategy using the new movement system
 impl Strategy for ExploreStrategy {
     fn name(&self) -> &'static str {
         "Explore"
@@ -90,27 +90,23 @@ impl Strategy for ExploreStrategy {
 
     fn base_priority(&self, ant_type: AntType) -> f32 {
         match ant_type {
-            AntType::Scout => 8000.0,
-            AntType::Worker => 5000.0,
-            AntType::Soldier => 3000.0,
+            AntType::Scout => 8.0,
+            AntType::Worker => 5.0,
+            AntType::Soldier => 3.0,
         }
     }
 
     fn global_priority_modifier(&self, game_state: &GameState) -> f32 {
-        // Count visible tiles as a metric for exploration coverage
         let visible_tile_count = game_state.visible_tiles.len();
-
-        // Use match to determine priority boost based on exploration level
         match visible_tile_count {
-            0..=30 => 7.0,   // High priority for early exploration
-            31..=80 => 4.0,  // Medium priority
-            81..=150 => 2.0, // Lower priority
-            _ => 0.0,        // Low priority once we've explored a lot
+            0..=30 => 7.0,
+            31..=80 => 4.0,
+            81..=150 => 2.0,
+            _ => 0.0,
         }
     }
 
     fn individual_priority_modifier(&self, ant: &Ant, game_state: &GameState) -> f32 {
-        // Simplified priority modifier that just checks if there are unexplored neighbors
         let has_unexplored_neighbors = ant
             .position
             .neighbors()
@@ -118,8 +114,6 @@ impl Strategy for ExploreStrategy {
             .any(|pos| !game_state.visible_tiles.contains_key(pos));
 
         let frontier_bonus = if has_unexplored_neighbors { 4.0 } else { 0.0 };
-
-        // Check if the ant is already moving (continuity bonus)
         let movement_bonus = if !ant.current_move.is_empty() {
             1.0
         } else {
@@ -130,69 +124,23 @@ impl Strategy for ExploreStrategy {
     }
 
     fn execute(&self, ant: &Ant, game_state: &GameState) -> Vec<HexCoord> {
-        // Get all passable neighboring tiles
-        let passable_neighbors: Vec<HexCoord> = ant
-            .position
-            .neighbors()
-            .into_iter()
-            .filter(|pos| {
-                match game_state.visible_tiles.get(pos) {
-                    Some(tile) => tile.tile_type.is_passable(),
-                    None => true, // Assume unexplored tiles are passable
-                }
-            })
-            .collect();
-
-        // Log the available directions
-        info!(
-            "Simple Explore: Ant {} at {:?} has {} passable neighbors",
-            &ant.id[0..8],
-            ant.position,
-            passable_neighbors.len()
-        );
-
-        if passable_neighbors.is_empty() {
-            info!(
-                "Simple Explore: Ant {} has no passable neighbors, staying put",
-                &ant.id[0..8]
-            );
-            return Vec::new(); // No valid moves
-        }
-
-        // Try to avoid going back to the previous position
-        let mut valid_moves: Vec<HexCoord>;
-        if !ant.last_move.is_empty() {
-            let previous_pos = ant.last_move[0];
-            valid_moves = passable_neighbors
-                .iter()
-                .filter(|pos| **pos != previous_pos)
-                .cloned() // Use cloned() to avoid ownership issues
-                .collect();
-
-            // If filtering out the previous position leaves us with no options, use all passable neighbors
-            if valid_moves.is_empty() {
-                valid_moves = passable_neighbors.clone(); // Clone to avoid ownership issues
-            }
-        } else {
-            valid_moves = passable_neighbors.clone(); // Clone to avoid ownership issues
-        }
-
-        // Pick a direction based on the ant's ID for deterministic but seemingly random behavior
-        let index = (ant.id.chars().next().unwrap_or('a') as usize) % valid_moves.len();
-        let chosen_move = valid_moves[index];
+        // Use the centralized movement system for exploration
+        let path = MovementManager::explore_move(ant, game_state);
 
         info!(
-            "Simple Explore: Ant {} moving from {:?} to {:?}",
+            "Explore: Ant {} (speed: {}) at {:?} planning {} moves: {:?}",
             &ant.id[0..8],
+            ant.ant_type.speed(),
             ant.position,
-            chosen_move
+            path.len(),
+            path
         );
 
-        vec![chosen_move]
+        path
     }
 }
 
-// Implementation for Gather strategy
+// Updated GatherStrategy
 impl Strategy for GatherStrategy {
     fn name(&self) -> &'static str {
         "Gather"
@@ -207,9 +155,7 @@ impl Strategy for GatherStrategy {
     }
 
     fn global_priority_modifier(&self, game_state: &GameState) -> f32 {
-        // Higher priority if we have food on the map
         let food_count = game_state.food_on_map.len();
-
         if food_count > 5 {
             3.0
         } else if food_count > 0 {
@@ -220,12 +166,10 @@ impl Strategy for GatherStrategy {
     }
 
     fn individual_priority_modifier(&self, ant: &Ant, game_state: &GameState) -> f32 {
-        // If ant is already carrying food, prioritize returning to base
         if ant.food.is_some() {
-            return 5.0;
+            return 5.0; // High priority to return home
         }
 
-        // If ant is near food, prioritize gathering it
         let near_food = game_state
             .food_on_map
             .values()
@@ -234,14 +178,18 @@ impl Strategy for GatherStrategy {
         if near_food { 4.0 } else { 0.0 }
     }
 
-    fn execute(&self, _ant: &Ant, _game_state: &GameState) -> Vec<HexCoord> {
-        // For now, just return an empty path
-        // A real implementation would either go to food or return to base
-        Vec::new()
+    fn execute(&self, ant: &Ant, game_state: &GameState) -> Vec<HexCoord> {
+        if ant.food.is_some() {
+            // Return to home if carrying food
+            MovementManager::return_to_home(ant, game_state)
+        } else {
+            // Go to nearest food
+            MovementManager::move_to_nearest_food(ant, game_state)
+        }
     }
 }
 
-// Implementation for Defend strategy
+// Updated DefendStrategy
 impl Strategy for DefendStrategy {
     fn name(&self) -> &'static str {
         "Defend"
@@ -256,7 +204,6 @@ impl Strategy for DefendStrategy {
     }
 
     fn global_priority_modifier(&self, game_state: &GameState) -> f32 {
-        // Example: If enemies are near home, increase defense priority
         let enemies_near_home = game_state.enemy_ants.values().any(|enemy| {
             game_state
                 .home_tiles
@@ -267,18 +214,29 @@ impl Strategy for DefendStrategy {
         if enemies_near_home { 10.0 } else { 0.0 }
     }
 
-    fn individual_priority_modifier(&self, ant: &Ant, game_state: &GameState) -> f32 {
-        // Example: Higher priority for ants closer to home
+    fn individual_priority_modifier(&self, _ant: &Ant, _game_state: &GameState) -> f32 {
         0.0
     }
 
-    fn execute(&self, _ant: &Ant, _game_state: &GameState) -> Vec<HexCoord> {
-        // Implementation for defending
-        Vec::new()
+    fn execute(&self, ant: &Ant, game_state: &GameState) -> Vec<HexCoord> {
+        // Find the most threatened home tile and move to defend it
+        if let Some(threatened_home) = game_state.home_tiles.iter().min_by_key(|home| {
+            game_state
+                .enemy_ants
+                .values()
+                .map(|enemy| enemy.position.distance_to(home))
+                .min()
+                .unwrap_or(i32::MAX)
+        }) {
+            MovementManager::move_to_defend(ant, *threatened_home, game_state)
+        } else {
+            // No specific threat, stay near main spot
+            MovementManager::move_to_defend(ant, game_state.main_spot, game_state)
+        }
     }
 }
 
-// Implementation for Attack strategy
+// Updated AttackStrategy
 impl Strategy for AttackStrategy {
     fn name(&self) -> &'static str {
         "Attack"
@@ -293,7 +251,6 @@ impl Strategy for AttackStrategy {
     }
 
     fn global_priority_modifier(&self, game_state: &GameState) -> f32 {
-        // Example: If we have many soldiers, increase attack priority
         let soldier_count = game_state
             .my_ants
             .values()
@@ -304,12 +261,26 @@ impl Strategy for AttackStrategy {
     }
 
     fn individual_priority_modifier(&self, ant: &Ant, game_state: &GameState) -> f32 {
-        // Example: Higher priority if ant is near an enemy
-        0.0
+        // Higher priority if ant is near an enemy
+        let near_enemy = game_state
+            .enemy_ants
+            .values()
+            .any(|enemy| ant.position.distance_to(&enemy.position) < 4);
+
+        if near_enemy { 3.0 } else { 0.0 }
     }
 
-    fn execute(&self, _ant: &Ant, _game_state: &GameState) -> Vec<HexCoord> {
-        // Implementation for attacking
-        Vec::new()
+    fn execute(&self, ant: &Ant, game_state: &GameState) -> Vec<HexCoord> {
+        // Find nearest enemy and attack
+        if let Some(nearest_enemy) = game_state
+            .enemy_ants
+            .values()
+            .min_by_key(|enemy| ant.position.distance_to(&enemy.position))
+        {
+            MovementManager::move_to_attack(ant, nearest_enemy, game_state)
+        } else {
+            // No enemies visible, explore to find them
+            MovementManager::explore_move(ant, game_state)
+        }
     }
 }

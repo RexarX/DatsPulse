@@ -286,14 +286,28 @@ impl HexCoord {
     }
 
     pub fn neighbors(&self) -> Vec<HexCoord> {
-        vec![
-            HexCoord::new(self.q + 1, self.r),
-            HexCoord::new(self.q + 1, self.r - 1),
-            HexCoord::new(self.q, self.r - 1),
-            HexCoord::new(self.q - 1, self.r),
-            HexCoord::new(self.q - 1, self.r + 1),
-            HexCoord::new(self.q, self.r + 1),
-        ]
+        let (q, r) = (self.q, self.r);
+        // Odd-r horizontal layout
+        let even = r % 2 == 0;
+        if even {
+            vec![
+                HexCoord::new(q + 1, r),     // E
+                HexCoord::new(q, r - 1),     // NE
+                HexCoord::new(q - 1, r - 1), // NW
+                HexCoord::new(q - 1, r),     // W
+                HexCoord::new(q - 1, r + 1), // SW
+                HexCoord::new(q, r + 1),     // SE
+            ]
+        } else {
+            vec![
+                HexCoord::new(q + 1, r),     // E
+                HexCoord::new(q + 1, r - 1), // NE
+                HexCoord::new(q, r - 1),     // NW
+                HexCoord::new(q - 1, r),     // W
+                HexCoord::new(q, r + 1),     // SW
+                HexCoord::new(q + 1, r + 1), // SE
+            ]
+        }
     }
 
     pub fn distance_to(&self, other: &HexCoord) -> i32 {
