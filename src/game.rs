@@ -44,6 +44,8 @@ pub fn game_logic_system(
     mut move_events: EventWriter<MoveCommandEvent>,
     _time: Res<Time>,
 ) {
+    use std::collections::{HashMap, HashSet};
+
     game_logic.update_count += 1;
 
     // Only take action if enough time has passed
@@ -58,34 +60,42 @@ pub fn game_logic_system(
 
     info!("Turn #{}: Strategy assignments:", game_state.turn_number);
 
-    // Process all ants and decide strategies
+    // Step 1: Collect all planned moves
+    let mut planned_moves: HashMap<&String, Vec<HexCoord>> = HashMap::new();
+    let mut strategy_names: HashMap<&String, &str> = HashMap::new();
+
     for (ant_id, ant) in &game_state.my_ants {
-        // First, get the strategy name and path without keeping a reference
-        let (strategy_name, path) = {
-            // Get the best strategy for this ant
-            let best_strategy = strategy_manager.select_strategy(ant, &game_state);
+        let best_strategy = strategy_manager.select_strategy(ant, &game_state);
+        let path = best_strategy.execute(ant, &game_state);
+        planned_moves.insert(ant_id, path);
+        strategy_names.insert(ant_id, best_strategy.name());
+    }
 
-            // Get the strategy name and the execution path
-            (
-                best_strategy.name(),
-                best_strategy.execute(ant, &game_state),
-            )
-        }; // The immutable borrow of strategy_manager ends here
-
-        // Now we can mutably borrow strategy_manager
-        strategy_manager.set_ant_strategy(ant_id, &strategy_name);
-
+    // Step 2: Reservation table to avoid move conflicts
+    let mut reserved: HashSet<HexCoord> = HashSet::new();
+    for (ant_id, path) in &planned_moves {
+        let strategy_name = strategy_names.get(ant_id).unwrap_or(&"Unknown");
         info!(
-            "  Ant {} (Type: {:?}, Pos: {:?}): {} strategy",
-            ant_id, ant.ant_type, ant.position, strategy_name
+            "Ant {} (type: {:?}) assigned '{}' strategy, path: {:?}",
+            ant_id, game_state.my_ants[*ant_id].ant_type, strategy_name, path
         );
 
-        // If the path is not empty, send a move command
-        if !path.is_empty() {
-            move_events.send(MoveCommandEvent {
-                ant_id: ant_id.clone(),
-                path,
-            });
+        if let Some(next_pos) = path.first() {
+            // Don't allow two ants to move to the same tile, or to a tile already occupied by another ant
+            let occupied = reserved.contains(next_pos)
+                || game_state
+                    .my_ants
+                    .values()
+                    .any(|ant| ant.position == *next_pos);
+
+            if !occupied && !path.is_empty() {
+                reserved.insert(*next_pos);
+                move_events.send(MoveCommandEvent {
+                    ant_id: (*ant_id).clone(),
+                    path: path.clone(),
+                });
+            }
+            // else: skip this move (ant will wait)
         }
     }
 

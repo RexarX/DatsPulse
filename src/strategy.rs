@@ -91,7 +91,7 @@ impl Strategy for ExploreStrategy {
     fn base_priority(&self, ant_type: AntType) -> f32 {
         match ant_type {
             AntType::Scout => 8.0,
-            AntType::Worker => 5.0,
+            AntType::Worker => 6.0,
             AntType::Soldier => 3.0,
         }
     }
@@ -114,13 +114,23 @@ impl Strategy for ExploreStrategy {
             .any(|pos| !game_state.visible_tiles.contains_key(pos));
 
         let frontier_bonus = if has_unexplored_neighbors { 4.0 } else { 0.0 };
+
         let movement_bonus = if !ant.current_move.is_empty() {
             1.0
         } else {
             0.0
         };
 
-        frontier_bonus + movement_bonus
+        let distance_to_base = (game_state
+            .home_tiles
+            .iter()
+            .map(|home| ant.position.distance_to(home))
+            .min()
+            .unwrap_or(0) as f32);
+
+        let base_bonus = 25.0 / (distance_to_base * 5.0 + 1.0);
+
+        frontier_bonus + movement_bonus + base_bonus
     }
 
     fn execute(&self, ant: &Ant, game_state: &GameState) -> Vec<HexCoord> {
@@ -156,31 +166,48 @@ impl Strategy for GatherStrategy {
 
     fn global_priority_modifier(&self, game_state: &GameState) -> f32 {
         let food_count = game_state.food_on_map.len();
-        if food_count > 5 {
-            3.0
-        } else if food_count > 0 {
-            1.0
-        } else {
-            0.0
+        match food_count {
+            n if n > 40 => 7.5,
+            n if n > 20 => 5.0,
+            n if n > 10 => 3.0,
+            n if n > 0 => 1.0,
+            _ => 0.0,
         }
     }
 
     fn individual_priority_modifier(&self, ant: &Ant, game_state: &GameState) -> f32 {
-        if ant.food.is_some() {
-            return 5.0; // High priority to return home
+        let threshold = ant.ant_type.capacity();
+        if ant.food.amount >= threshold {
+            return 20.0; // High priority to return home
         }
 
-        let near_food = game_state
+        // Find the closest food not on home tiles
+        if let Some(closest_food) = game_state
             .food_on_map
             .values()
-            .any(|food| ant.position.distance_to(&food.position) < 3);
+            .filter(|food| !game_state.home_tiles.contains(&food.position))
+            .min_by_key(|food| ant.position.distance_to(&food.position))
+        {
+            let dist = ant.position.distance_to(&closest_food.position) as f32;
+            // Priority increases as food gets closer (tweak the formula as you like)
+            return 20.0 / (dist + 1.0) + (ant.food.amount as f32) * 5.0;
+        }
 
-        if near_food { 4.0 } else { 0.0 }
+        // No food found
+        0.0
     }
 
     fn execute(&self, ant: &Ant, game_state: &GameState) -> Vec<HexCoord> {
-        if ant.food.is_some() {
-            // Return to home if carrying food
+        let threshold = ant.ant_type.capacity();
+        let ants_in_base = game_state
+            .my_ants
+            .values()
+            .filter(|ant| game_state.home_tiles.contains(&ant.position))
+            .count();
+        if ((ant.food.amount as f32) / (threshold as f32) >= 0.5 + 0.12 * (ants_in_base as f32))
+            || ((ant.health as f32) / (ant.ant_type.health() as f32) <= 0.3)
+        {
+            // Return to home if carrying food or low on health
             MovementManager::return_to_home(ant, game_state)
         } else {
             // Go to nearest food

@@ -65,11 +65,11 @@ impl MovementManager {
         }
     }
 
-    /// Find the nearest food and return a path to it
     pub fn move_to_nearest_food(ant: &Ant, game_state: &GameState) -> Vec<HexCoord> {
         let nearest_food = game_state
             .food_on_map
             .values()
+            .filter(|food| !game_state.home_tiles.contains(&food.position)) // Ignore food at home
             .min_by_key(|food| ant.position.distance_to(&food.position));
 
         if let Some(food) = nearest_food {
@@ -263,4 +263,34 @@ impl PathFinder {
         // A proper A* implementation would go here
         Some(vec![start, target])
     }
+}
+
+/// Filters move commands to avoid two ants moving into the same tile.
+/// Returns a vector of (ant_id, path) for moves that are conflict-free.
+/// Filters move commands to avoid two ants moving into the same tile.
+/// Returns a vector of (ant_id, path) for moves that are conflict-free.
+pub fn filter_conflicting_moves<'a>(
+    planned_moves: &'a HashMap<&'a String, Vec<HexCoord>>,
+    game_state: &'a GameState,
+) -> Vec<(&'a String, &'a Vec<HexCoord>)> {
+    let mut reserved: HashSet<HexCoord> = HashSet::new();
+    let mut result = Vec::new();
+
+    for (ant_id, path) in planned_moves {
+        if let Some(next_pos) = path.first() {
+            // Don't allow two ants to move to the same tile, or to a tile already occupied by another ant
+            let occupied = reserved.contains(next_pos)
+                || game_state
+                    .my_ants
+                    .values()
+                    .any(|ant| ant.position == *next_pos);
+
+            if !occupied {
+                reserved.insert(*next_pos);
+                result.push((*ant_id, path)); // Use reference to path, not owned value
+            }
+            // else: skip this move (ant will wait)
+        }
+    }
+    result
 }
