@@ -9,6 +9,7 @@ impl Plugin for RenderingPlugin {
             Update,
             (
                 update_world_rendering,
+                color_ant_models,
                 debug_rendering_system,
                 update_camera_focus,
             ),

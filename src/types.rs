@@ -435,6 +435,7 @@ impl FoodType {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum TileType {
+    Unknown = 0, // For non-visible tiles too
     Anthill = 1,
     Plain = 2,
     Dirt = 3,
@@ -467,6 +468,7 @@ impl TileType {
 
     pub fn movement_cost(&self) -> Option<i32> {
         match self {
+            TileType::Unknown => None, // Impassable
             TileType::Anthill => Some(1),
             TileType::Plain => Some(1),
             TileType::Dirt => Some(2),

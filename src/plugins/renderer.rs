@@ -15,6 +15,7 @@ impl Plugin for RendererPlugin {
                     apply_framerate_limit,
                     apply_window_settings,
                     apply_clear_color,
+                    apply_wireframe_settings,
                 )
                     .chain()
                     .before(reset_renderer_settings_changed),

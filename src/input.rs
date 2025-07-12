@@ -14,6 +14,8 @@ pub struct CameraController {
     pub min_zoom: f32,
     pub max_zoom: f32,
     pub current_zoom: f32,
+    pub target_zoom: f32,
+    pub target_position: Vec3,
 }
 
 impl Default for CameraController {
@@ -26,6 +28,8 @@ impl Default for CameraController {
             min_zoom: 5.0,
             max_zoom: 50.0,
             current_zoom: 20.0,
+            target_zoom: 20.0,
+            target_position: Vec3::default(),
         }
     }
 }
@@ -61,6 +65,8 @@ pub fn setup_input(mut commands: Commands, app_config: Res<AppConfig>) {
         min_zoom: app_config.camera.min_zoom,
         max_zoom: app_config.camera.max_zoom,
         current_zoom: app_config.camera.current_zoom,
+        target_zoom: app_config.camera.current_zoom,
+        target_position: Vec3::new(0.0, 0.0, 0.0),
     };
 
     let drag_state = MouseDragState {
@@ -98,21 +104,19 @@ pub fn camera_movement_system(
             controller.movement_speed
         };
 
-        // WASD movement
         if keyboard_input.pressed(KeyCode::KeyW) {
-            movement.x -= speed * time.delta_secs();
-        }
-        if keyboard_input.pressed(KeyCode::KeyS) {
-            movement.x += speed * time.delta_secs();
-        }
-        if keyboard_input.pressed(KeyCode::KeyA) {
-            movement.z += speed * time.delta_secs();
-        }
-        if keyboard_input.pressed(KeyCode::KeyD) {
             movement.z -= speed * time.delta_secs();
         }
+        if keyboard_input.pressed(KeyCode::KeyS) {
+            movement.z += speed * time.delta_secs();
+        }
+        if keyboard_input.pressed(KeyCode::KeyA) {
+            movement.x -= speed * time.delta_secs();
+        }
+        if keyboard_input.pressed(KeyCode::KeyD) {
+            movement.x += speed * time.delta_secs();
+        }
 
-        // Mouse drag movement
         if mouse_button_input.pressed(MouseButton::Right) {
             if !drag_state.is_dragging {
                 drag_state.is_dragging = true;
@@ -123,32 +127,48 @@ pub fn camera_movement_system(
                 }
             } else {
                 for event in mouse_motion_events.read() {
-                    // Make drag speed independent of zoom by using a fixed base sensitivity
-                    let base_drag_sensitivity = 0.02;
-                    let drag_delta = event.delta * base_drag_sensitivity;
-                    movement.x -= drag_delta.y;
-                    movement.z += drag_delta.x;
+                    // Zoom scaling
+                    let zoom_ratio = (controller.current_zoom - controller.min_zoom)
+                        / (controller.max_zoom - controller.min_zoom);
+                    let min_drag_multiplier = 0.1;
+                    let max_drag_multiplier = 2.0;
+                    let drag_multiplier = min_drag_multiplier
+                        + (max_drag_multiplier - min_drag_multiplier) * zoom_ratio;
+                    let zoom_adjusted_sensitivity = drag_state.drag_sensitivity * drag_multiplier;
+
+                    let drag_delta = event.delta * zoom_adjusted_sensitivity;
+
+                    // Only move in XZ plane (ignore Y)
+                    controller.target_position.z += drag_delta.x;
+                    controller.target_position.x -= drag_delta.y;
                 }
             }
         } else {
             drag_state.is_dragging = false;
         }
 
-        // Mouse wheel zoom
         for event in scroll_events.read() {
-            let zoom_delta = event.y * controller.zoom_speed * time.delta_secs();
-            controller.current_zoom = (controller.current_zoom - zoom_delta)
+            let zoom_delta = event.y * controller.zoom_speed * 0.15;
+            controller.target_zoom = (controller.target_zoom - zoom_delta)
                 .clamp(controller.min_zoom, controller.max_zoom);
-
-            let current_pos = camera_transform.translation;
-            let target_pos = Vec3::new(current_pos.x, controller.current_zoom, current_pos.z);
-            camera_transform.translation = target_pos;
         }
 
-        // Apply movement
-        camera_transform.translation += movement;
+        controller.target_position += movement;
 
-        // Ensure camera always looks down at an angle
+        let lerp_speed = 10.0;
+        camera_transform.translation = camera_transform.translation.lerp(
+            Vec3::new(
+                controller.target_position.x,
+                controller.current_zoom,
+                controller.target_position.z,
+            ),
+            lerp_speed * time.delta_secs(),
+        );
+
+        controller.current_zoom = controller
+            .current_zoom
+            .lerp(controller.target_zoom, lerp_speed * time.delta_secs());
+
         let look_at_target = Vec3::new(
             camera_transform.translation.x,
             0.0,

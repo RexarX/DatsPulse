@@ -10,7 +10,7 @@ use bevy::{
     window::PresentMode,
 };
 
-use crate::{config::AppConfig, types::GameCamera};
+use crate::{WireframeConfig, config::AppConfig, types::GameCamera};
 
 #[derive(Resource, Clone)]
 pub struct RendererSettings {
@@ -250,6 +250,44 @@ pub fn apply_clear_color(
             app_config.renderer.clear_color.2
         );
     }
+}
+
+pub fn apply_wireframe_settings(
+    mut commands: Commands,
+    wireframe_config: Res<WireframeConfig>,
+    app_config: Res<AppConfig>,
+    renderer_settings: Res<RendererSettings>,
+    // Query for mesh entities that could have wireframe
+    mesh_query: Query<Entity, With<Mesh3d>>,
+    // Query for entities that already have wireframe
+    wireframe_query: Query<Entity, With<bevy::pbr::wireframe::Wireframe>>,
+) {
+    if !renderer_settings.settings_changed {
+        return;
+    }
+
+    if app_config.renderer.wireframe_enabled {
+        // Add wireframe to all mesh entities that don't have it
+        for entity in mesh_query.iter() {
+            if !wireframe_query.contains(entity) {
+                commands
+                    .entity(entity)
+                    .insert(bevy::pbr::wireframe::Wireframe);
+            }
+        }
+    } else {
+        // Remove wireframe from all entities that have it
+        for entity in wireframe_query.iter() {
+            commands
+                .entity(entity)
+                .remove::<bevy::pbr::wireframe::Wireframe>();
+        }
+    }
+
+    info!(
+        "Wireframe settings applied: {}",
+        app_config.renderer.wireframe_enabled
+    );
 }
 
 // System to update renderer settings from config

@@ -136,6 +136,7 @@ fn main() -> anyhow::Result<()> {
             DefaultPlugins
                 .set(RenderPlugin {
                     render_creation: RenderCreation::Automatic(WgpuSettings {
+                        // WARN this is a native only feature. It will not work with webgl or webgpu
                         features: WgpuFeatures::POLYGON_MODE_LINE,
                         ..default()
                     }),
@@ -164,6 +165,7 @@ fn main() -> anyhow::Result<()> {
         .add_plugins((
             FrameTimeDiagnosticsPlugin::default(),
             TokioTasksPlugin::default(),
+            WireframePlugin::default(),
             EguiPlugin::default(),
         ))
         // Custom plugins
@@ -172,7 +174,6 @@ fn main() -> anyhow::Result<()> {
             GamePlugin,
             InputPlugin,
             TemporalAntiAliasPlugin,
-            WireframePlugin::default(),
             MenuPlugin,
             UiPlugin,
             RenderingPlugin,
@@ -190,11 +191,11 @@ fn main() -> anyhow::Result<()> {
             )
             .into(),
         })
-        .insert_resource(clear_color)
+        .insert_resource(ConnectionState::default())
         .insert_resource(app_config)
         .insert_resource(server_config)
         .insert_resource(GameState::default())
-        .insert_resource(ConnectionState::default())
+        .insert_resource(clear_color)
         .run();
 
     Ok(())
