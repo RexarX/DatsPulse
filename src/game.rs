@@ -73,18 +73,18 @@ pub fn game_logic_system(
 
     // Step 2: Reservation table to avoid move conflicts
     let mut reserved: HashSet<HexCoord> = HashSet::new();
-    for (ant_id, path) in &planned_moves {
+    for (ant_id, path) in planned_moves {
         let strategy_name = strategy_names.get(ant_id).unwrap_or(&"Unknown");
         info!(
             "Ant {} (type: {:?}) assigned '{}' strategy, path: {:?}",
-            ant_id, game_state.my_ants[*ant_id].ant_type, strategy_name, path
+            ant_id, game_state.my_ants[ant_id].ant_type, strategy_name, path
         );
 
         // If the path is not empty, send a move command
         if !path.is_empty() {
             move_events.write(MoveCommandEvent {
                 ant_id: ant_id.clone(),
-                path,
+                path: path,
             });
         }
     }
