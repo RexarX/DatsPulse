@@ -1,12 +1,13 @@
 use bevy::{
     core_pipeline::{
         experimental::taa::TemporalAntiAliasing,
+        fxaa::Fxaa,
         prepass::{DepthPrepass, MotionVectorPrepass},
         smaa::{Smaa, SmaaPreset},
     },
     pbr::{ScreenSpaceAmbientOcclusion, ScreenSpaceAmbientOcclusionQualityLevel},
     prelude::*,
-    render::camera::{MipBias, TemporalJitter},
+    render::camera::TemporalJitter,
     window::PresentMode,
 };
 
@@ -92,46 +93,47 @@ pub fn apply_anti_aliasing(
     }
 
     for camera_entity in camera_query.iter() {
-        let mut camera_commands = commands.entity(camera_entity);
+        let mut camera = commands.entity(camera_entity);
 
         // Remove all existing AA components
-        camera_commands
-            .remove::<Msaa>()
+        camera
+            .remove::<Fxaa>()
             .remove::<Smaa>()
             .remove::<TemporalAntiAliasing>()
             .remove::<TemporalJitter>()
-            .remove::<MipBias>()
             .remove::<DepthPrepass>()
             .remove::<MotionVectorPrepass>();
 
         // Apply the selected anti-aliasing
         match renderer_settings.current_aa {
             AntiAliasingMode::None => {
-                camera_commands.insert(Msaa::Off);
+                camera.insert(Msaa::Off);
             }
             AntiAliasingMode::Msaa2 => {
-                camera_commands.insert(Msaa::Sample2);
+                camera.insert(Msaa::Sample2);
             }
             AntiAliasingMode::Msaa4 => {
-                camera_commands.insert(Msaa::Sample4);
+                camera.insert(Msaa::Sample4);
             }
             AntiAliasingMode::Msaa8 => {
-                camera_commands.insert(Msaa::Sample8);
+                camera.insert(Msaa::Sample8);
             }
             AntiAliasingMode::Fxaa => {
-                // FXAA is built into the default pipeline in Bevy 0.16
-                // Just disable MSAA and it will use FXAA automatically
-                camera_commands.insert(Msaa::Off);
+                camera.insert(Msaa::Off);
+                camera.insert(Fxaa::default());
             }
             AntiAliasingMode::Smaa => {
-                camera_commands.insert(Msaa::Off).insert(Smaa {
+                camera.insert(Msaa::Off);
+                camera.insert(Smaa {
                     preset: SmaaPreset::High,
                 });
             }
             AntiAliasingMode::Taa => {
-                camera_commands
-                    .insert(Msaa::Off)
-                    .insert(TemporalAntiAliasing::default());
+                camera.insert(Msaa::Off);
+                camera.insert(TemporalAntiAliasing::default());
+                camera.insert(TemporalJitter::default());
+                camera.insert(DepthPrepass);
+                camera.insert(MotionVectorPrepass);
             }
         }
 
@@ -144,30 +146,24 @@ pub fn apply_ssao(
     camera_query: Query<Entity, With<GameCamera>>,
     renderer_settings: Res<RendererSettings>,
 ) {
+    use bevy::pbr::{ScreenSpaceAmbientOcclusion, ScreenSpaceAmbientOcclusionQualityLevel};
+
     if !renderer_settings.settings_changed {
         return;
     }
 
     for camera_entity in camera_query.iter() {
-        let mut camera_commands = commands.entity(camera_entity);
+        let mut camera = commands.entity(camera_entity);
 
         if renderer_settings.current_ssao {
-            camera_commands.insert(ScreenSpaceAmbientOcclusion {
+            camera.insert(ScreenSpaceAmbientOcclusion {
                 quality_level: ScreenSpaceAmbientOcclusionQualityLevel::High,
                 constant_object_thickness: 0.15,
+                ..Default::default()
             });
         } else {
-            camera_commands.remove::<ScreenSpaceAmbientOcclusion>();
+            camera.remove::<ScreenSpaceAmbientOcclusion>();
         }
-
-        info!(
-            "SSAO {}",
-            if renderer_settings.current_ssao {
-                "enabled"
-            } else {
-                "disabled"
-            }
-        );
     }
 }
 

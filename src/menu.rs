@@ -539,7 +539,6 @@ pub fn menu_ui_system(
 
                 if ui.button("Apply All Renderer Settings").clicked() {
                     apply_renderer_settings(
-                        &mut windows,
                         &app_config,
                         &mut renderer_settings,
                         &mut clear_color,
@@ -881,7 +880,6 @@ fn apply_display_settings(
 }
 
 fn apply_renderer_settings(
-    windows: &mut Query<&mut Window>,
     app_config: &AppConfig,
     renderer_settings: &mut RendererSettings,
     clear_color: &mut ClearColor,
@@ -910,32 +908,7 @@ fn apply_renderer_settings(
     )
     .into();
 
-    // Update window settings
-    if let Ok(mut window) = windows.single_mut() {
-        window.resolution = bevy::window::WindowResolution::new(
-            app_config.renderer.resolution.0 as f32,
-            app_config.renderer.resolution.1 as f32,
-        );
-
-        window.present_mode = if app_config.renderer.vsync {
-            bevy::window::PresentMode::AutoVsync
-        } else {
-            bevy::window::PresentMode::AutoNoVsync
-        };
-
-        window.mode = match app_config.renderer.window_mode.as_str() {
-            "borderless" => bevy::window::WindowMode::BorderlessFullscreen(
-                bevy::window::MonitorSelection::Primary,
-            ),
-            "fullscreen" => bevy::window::WindowMode::Fullscreen(
-                bevy::window::MonitorSelection::Primary,
-                bevy::window::VideoModeSelection::Current,
-            ),
-            _ => bevy::window::WindowMode::Windowed,
-        };
-
-        info!("Applied all renderer settings");
-    }
+    info!("Applied all renderer settings");
 }
 
 fn update_camera_fov(camera_query: &mut Query<&mut Projection, With<GameCamera>>, fov: f32) {

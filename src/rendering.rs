@@ -1,17 +1,17 @@
 use crate::input::CameraController;
 use crate::menu::MenuState;
 use crate::types::*;
+use bevy::color::palettes;
 use bevy::math::prelude::*;
 use bevy::prelude::*;
+use bevy::scene::SceneInstanceReady;
 use std::collections::{HashMap, HashSet};
 
 #[derive(Resource)]
 pub struct RenderingAssets {
-    pub ant_materials: HashMap<AntType, Handle<StandardMaterial>>,
     pub food_materials: HashMap<FoodType, Handle<StandardMaterial>>,
     pub tile_materials: HashMap<TileType, Handle<StandardMaterial>>,
     pub home_material: Handle<StandardMaterial>,
-    pub enemy_material: Handle<StandardMaterial>,
     pub ground_material: Handle<StandardMaterial>,
     pub ant_model: Handle<Scene>,
     pub food_mesh: Handle<Mesh>,
@@ -20,10 +20,10 @@ pub struct RenderingAssets {
 }
 
 #[derive(Component)]
-pub struct GroundPlane;
+pub struct PersistentHex;
 
 #[derive(Component)]
-pub struct PersistentHex;
+pub struct ColorOverride(Color);
 
 pub fn setup_3d_scene(
     mut commands: Commands,
@@ -62,41 +62,7 @@ pub fn setup_3d_scene(
     let home_mesh = meshes.add(Cylinder::new(0.8, 0.2));
 
     // Load ant glTF model
-    let ant_model = asset_server.load("models/ant/scene.gltf#Scene0");
-
-    // Ant materials with better visibility
-    let mut ant_materials = HashMap::new();
-    ant_materials.insert(
-        AntType::Worker,
-        materials.add(StandardMaterial {
-            base_color: Color::srgb(0.2, 0.4, 0.9), // Blue for workers
-            metallic: 0.1,
-            perceptual_roughness: 0.8,
-            alpha_mode: AlphaMode::Opaque,
-            ..default()
-        }),
-    );
-    ant_materials.insert(
-        AntType::Soldier,
-        materials.add(StandardMaterial {
-            base_color: Color::srgb(0.9, 0.2, 0.2), // Red for soldiers
-            metallic: 0.2,
-            perceptual_roughness: 0.7,
-            alpha_mode: AlphaMode::Opaque,
-            ..default()
-        }),
-    );
-    ant_materials.insert(
-        AntType::Scout,
-        materials.add(StandardMaterial {
-            base_color: Color::srgb(0.2, 0.9, 0.2), // Green for scouts
-            metallic: 0.1,
-            perceptual_roughness: 0.8,
-            alpha_mode: AlphaMode::Opaque,
-            ..default()
-        }),
-    );
-
+    let ant_model = asset_server.load(GltfAssetLabel::Scene(0).from_asset("models/ant/scene.gltf"));
     // Food materials
     let mut food_materials = HashMap::new();
     food_materials.insert(
@@ -191,14 +157,6 @@ pub fn setup_3d_scene(
         ..default()
     });
 
-    let enemy_material = materials.add(StandardMaterial {
-        base_color: Color::srgb(0.9, 0.1, 0.1), // Red for enemies
-        emissive: LinearRgba::new(0.3, 0.0, 0.0, 1.0),
-        metallic: 0.1,
-        perceptual_roughness: 0.8,
-        ..default()
-    });
-
     let ground_material = materials.add(StandardMaterial {
         base_color: Color::srgb(0.2, 0.3, 0.2),
         metallic: 0.0,
@@ -207,11 +165,9 @@ pub fn setup_3d_scene(
     });
 
     commands.insert_resource(RenderingAssets {
-        ant_materials,
         food_materials,
         tile_materials,
         home_material,
-        enemy_material,
         ground_material,
         ant_model,
         food_mesh,
@@ -241,8 +197,8 @@ pub fn update_world_rendering(
     }
 
     // Create a comprehensive hex grid
-    let grid_size = 25; // Adjust as needed
-    let mut existing_hexes: HashMap<HexCoord, Entity> = existing_hex_query
+    let grid_size = 50; // Adjust as needed
+    let existing_hexes: HashMap<HexCoord, Entity> = existing_hex_query
         .iter()
         .map(|(entity, marker)| (marker.position, entity))
         .collect();
@@ -394,102 +350,40 @@ pub fn update_camera_focus(
     }
 }
 
-pub fn color_ant_models(
+pub fn change_material(
+    trigger: Trigger<SceneInstanceReady>,
     mut commands: Commands,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-    ant_query: Query<(Entity, &AntMarker), Added<AntMarker>>,
-    mesh_query: Query<Entity, With<Mesh3d>>,
-    children_query: Query<&Children>,
-    mut colored_ants: Local<HashSet<Entity>>,
+    children: Query<&Children>,
+    color_override: Query<&ColorOverride>,
+    mesh_materials: Query<&MeshMaterial3d<StandardMaterial>>,
+    mut asset_materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    for (ant_entity, ant_marker) in ant_query.iter() {
-        if colored_ants.contains(&ant_entity) {
-            continue;
-        }
+    // Get the `ColorOverride` of the entity, if it does not have a color override, skip
+    let Ok(color_override) = color_override.get(trigger.target()) else {
+        return;
+    };
 
-        let (color, emissive) = if ant_marker.is_enemy {
-            // Red tint for enemies with slight glow
-            (
-                Color::srgb(0.9, 0.1, 0.1),
-                LinearRgba::new(0.3, 0.0, 0.0, 1.0),
-            )
-        } else {
-            // Class-based colors for friendly ants
-            match ant_marker.ant_type {
-                AntType::Worker => (
-                    Color::srgb(0.2, 0.4, 0.9),
-                    LinearRgba::new(0.0, 0.0, 0.2, 1.0),
-                ), // Blue
-                AntType::Soldier => (
-                    Color::srgb(0.9, 0.2, 0.2),
-                    LinearRgba::new(0.2, 0.0, 0.0, 1.0),
-                ), // Red
-                AntType::Scout => (
-                    Color::srgb(0.2, 0.9, 0.2),
-                    LinearRgba::new(0.0, 0.2, 0.0, 1.0),
-                ), // Green
-            }
-        };
+    // Iterate over all children recursively
+    for descendants in children.iter_descendants(trigger.target()) {
+        // Get the material of the descendant
+        if let Some(material) = mesh_materials
+            .get(descendants)
+            .ok()
+            .and_then(|id| asset_materials.get_mut(id.id()))
+        {
+            // Create a copy of the material and override base color
+            // If you intend on creating multiple models with the same tint, it
+            // is best to cache the handle somewhere, as having multiple materials
+            // that are identical is expensive
+            let mut new_material = material.clone();
+            new_material.base_color = color_override.0;
 
-        let new_material = materials.add(StandardMaterial {
-            base_color: color,
-            emissive,
-            metallic: 0.1,
-            perceptual_roughness: 0.8,
-            alpha_mode: AlphaMode::Opaque,
-            ..default()
-        });
-
-        let mesh_count = find_and_color_meshes(
-            &mut commands,
-            ant_entity,
-            &mesh_query,
-            &children_query,
-            new_material,
-        );
-
-        if mesh_count > 0 {
-            colored_ants.insert(ant_entity);
-        }
-    }
-}
-
-fn find_and_color_meshes(
-    commands: &mut Commands,
-    root_entity: Entity,
-    mesh_query: &Query<Entity, With<Mesh3d>>,
-    children_query: &Query<&Children>,
-    material: Handle<StandardMaterial>,
-) -> usize {
-    let mut mesh_count = 0;
-    let mut stack = Vec::new();
-    let mut visited = HashSet::new();
-
-    stack.push(root_entity);
-
-    while let Some(entity) = stack.pop() {
-        if visited.contains(&entity) {
-            continue;
-        }
-        visited.insert(entity);
-
-        if mesh_query.contains(entity) {
+            // Override `MeshMaterial3d` with new material
             commands
-                .entity(entity)
-                .insert(MeshMaterial3d(material.clone()));
-            mesh_count += 1;
-        }
-
-        if let Ok(children) = children_query.get(entity) {
-            for child in children.iter() {
-                if !visited.contains(&child) {
-                    stack.push(child);
-                }
-            }
+                .entity(descendants)
+                .insert(MeshMaterial3d(asset_materials.add(new_material)));
         }
     }
-
-    mesh_count
 }
 
 // Separate function for rendering home tiles
@@ -550,17 +444,27 @@ fn render_ants(
         let position = base_position + offset;
 
         let health_ratio = ant.health as f32 / ant.ant_type.health() as f32;
-        let scale = (0.9 + health_ratio * 0.3) * 0.005;
+        let scale = (0.8 + health_ratio * 0.5) * 0.005;
 
-        commands.spawn((
-            SceneRoot(rendering_assets.ant_model.clone()),
-            Transform::from_translation(position).with_scale(Vec3::splat(scale)),
-            AntMarker {
-                ant_id: ant_id.clone(),
-                ant_type: ant.ant_type,
-                is_enemy: false,
-            },
-        ));
+        let ant_marker = AntMarker {
+            ant_id: ant_id.clone(),
+            ant_type: ant.ant_type,
+            is_enemy: false,
+        };
+        if let Some(color) = get_ant_color(&ant_marker) {
+            commands.spawn((
+                SceneRoot(rendering_assets.ant_model.clone()),
+                Transform::from_translation(position).with_scale(Vec3::splat(scale)),
+                ColorOverride(color),
+                ant_marker,
+            ));
+        } else {
+            commands.spawn((
+                SceneRoot(rendering_assets.ant_model.clone()),
+                Transform::from_translation(position).with_scale(Vec3::splat(scale)),
+                ant_marker,
+            ));
+        }
     }
 
     // Render enemy ants
@@ -576,8 +480,27 @@ fn render_ants(
         let position = base_position + offset;
 
         let health_ratio = enemy.health as f32 / enemy.ant_type.health() as f32;
-        let scale = (0.9 + health_ratio * 0.3) * 0.005;
+        let scale = (1.0 + health_ratio * 0.5) * 0.005;
 
+        let ant_marker = AntMarker {
+            ant_id: enemy_id.clone(),
+            ant_type: enemy.ant_type,
+            is_enemy: true,
+        };
+        if let Some(color) = get_ant_color(&ant_marker) {
+            commands.spawn((
+                SceneRoot(rendering_assets.ant_model.clone()),
+                Transform::from_translation(position).with_scale(Vec3::splat(scale)),
+                ColorOverride(color),
+                ant_marker,
+            ));
+        } else {
+            commands.spawn((
+                SceneRoot(rendering_assets.ant_model.clone()),
+                Transform::from_translation(position).with_scale(Vec3::splat(scale)),
+                ant_marker,
+            ));
+        }
         commands.spawn((
             SceneRoot(rendering_assets.ant_model.clone()),
             Transform::from_translation(position).with_scale(Vec3::splat(scale)),
@@ -681,6 +604,19 @@ fn determine_hex_appearance(
             .unwrap_or(&rendering_assets.tile_materials[&TileType::Plain])
             .clone();
         (TileType::Unknown, material)
+    }
+}
+
+fn get_ant_color(ant_marker: &AntMarker) -> Option<Color> {
+    if ant_marker.is_enemy {
+        // Red tint for enemies with slight glow
+        return Some(Color::srgb(1.0, 0.0, 0.0));
+    }
+    // Class-based colors for friendly ants
+    match ant_marker.ant_type {
+        AntType::Worker => None,
+        AntType::Soldier => Some(Color::srgb(0.0, 1.0, 0.0)),
+        AntType::Scout => Some(Color::srgb(0.0, 0.0, 1.0)),
     }
 }
 
